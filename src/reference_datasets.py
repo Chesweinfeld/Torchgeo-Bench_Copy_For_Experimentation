@@ -64,7 +64,7 @@ def get_datasets(
             stdevs = []
             for band_name in train_dataset.band_names:
                 stdevs.append(train_dataset.band_stats[band_name].percentile_99)
-        elif normalization == "min_max_full":
+        elif normalization == "min_max":
             means = []
             stdevs = []
             for band_name in train_dataset.band_names:
@@ -75,6 +75,9 @@ def get_datasets(
         elif normalization == "255":
             means = [0] * len(selected_bands)
             stdevs = [255] * len(selected_bands)
+        elif normalization == "none":
+            means = [0] * len(selected_bands)
+            stdevs = [1] * len(selected_bands)
 
         valid_partitions = train_dataset.list_partitions()
         transform = get_transform(means, stdevs, selected_bands)
