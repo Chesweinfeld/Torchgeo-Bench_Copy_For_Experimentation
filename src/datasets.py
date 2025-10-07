@@ -29,7 +29,7 @@ PARTITION_NAMES = [
 ]
 
 # Default GeoBench data root - override via environment variable if needed
-DEFAULT_GEOBENCH_ROOT = "/datadrive/davrob/ssdprivate/data/classification_v1.0"
+DEFAULT_GEOBENCH_ROOT = "data/classification_v1.0"
 
 
 def get_datasets(

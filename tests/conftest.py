@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 # GeoBench data root - can override with environment variable
-GEOBENCH_ROOT = os.getenv("GEOBENCH_ROOT", "/datadrive/davrob/ssdprivate/data/classification_v1.0")
+GEOBENCH_ROOT = os.getenv("GEOBENCH_ROOT", "data/classification_v1.0")
 
 # Set GEO_BENCH_DIR for reference implementation (geobench library)
 # This needs to be set BEFORE the geobench library is imported

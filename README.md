@@ -2,6 +2,20 @@
 
 A lightweight benchmarking framework for evaluating geospatial foundation models and feature extractors on standardized datasets.
 
+## Setup: Download GeoBench Dataset
+
+Before running any benchmarks, download the GeoBench dataset:
+
+```bash
+python torchgeo_bench_download.py
+```
+
+This will download and extract the dataset to the default directory `data/`. You can specify a custom location with:
+
+```bash
+python torchgeo_bench_download.py --output-dir /your/path/to/data
+```
+
 ## Overview
 
 `torchgeo-bench` provides:
@@ -33,6 +47,8 @@ conda activate torchgeo-bench
 
 ```bash
 # Run benchmark with default RCF model on all datasets
+
+# Run benchmark (expects GeoBench data in 'data/')
 python torchgeo_bench.py
 
 # Use pretrained ResNet50
@@ -143,16 +159,6 @@ python torchgeo_bench.py dataset.partition=0.01x_train
 # Available: 0.01x, 0.02x, 0.05x, 0.10x, 0.20x, 0.50x, 1.00x, default
 ```
 
-### Data Location
-
-By default, expects data at `/datadrive/davrob/ssdprivate/data/classification_v1.0`. Override:
-
-```bash
-export GEOBENCH_ROOT=/path/to/data/classification_v1.0
-```
-
-Or edit `src/datasets.py::DEFAULT_GEOBENCH_ROOT`.
-
 ## Configuration
 
 ### Hydra Configuration Structure
@@ -251,6 +257,15 @@ python torchgeo_bench.py \
   eval.bootstrap=10 \
   output=test.csv
 ```
+
+**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set the environment variable `GEOBENCH_ROOT` to the full path of your dataset root before running tests:
+
+```bash
+export GEOBENCH_ROOT=/your/path/to/classification_v1.0
+pytest
+```
+
+If the dataset is not found, relevant tests will be skipped.
 
 The test suite includes:
 - **58 tests** covering all datasets, splits, and normalizations
