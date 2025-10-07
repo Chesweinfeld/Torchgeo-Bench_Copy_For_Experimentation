@@ -228,64 +228,6 @@ m-eurosat,knn5,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFB
 m-eurosat,linear,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench
 ```
 
-## Architecture
-
-```
-torchgeo-bench/
-├── conf/                   # Hydra configs
-│   ├── config.yaml
-│   └── model/
-│       ├── rcf.yaml
-│       └── resnet50.yaml
-├── src/
-│   ├── __init__.py
-│   ├── interface.py        # BenchModel abstract base class
-│   ├── bench_models.py     # RCFBench, TimmResNet50Bench
-│   ├── datasets.py         # get_datasets() factory
-│   ├── geobench_dataset.py # Lightweight PyTorch Dataset
-│   ├── models.py           # Legacy RCF implementation
-│   ├── features.py         # (placeholder)
-│   └── utils.py            # extract_features()
-├── torchgeo_bench.py       # Main benchmark script
-├── test_geobench_dataset.py # Dataset tests
-├── pyproject.toml
-└── README.md
-```
-
-## Advanced Usage
-
-### Embedding Caching (Future)
-
-Currently embeddings are recomputed each run. Planned: cache to disk per (model, dataset, partition).
-
-### Semantic Segmentation (Future)
-
-Interface includes `forward_pixel_features()` method for dense predictions. Pending segmentation benchmark integration.
-
-### Multi-Label Tasks (Future)
-
-BigEarthNet and other multi-label datasets require metric adjustments (F1, mAP). Planned support.
-
-### Custom Transforms
-
-```python
-from src.geobench_dataset import GeoBenchDataset
-import torchvision.transforms.v2 as T
-
-transform = T.Compose([
-    T.RandomHorizontalFlip(),
-    T.RandomVerticalFlip(),
-    # ... add your augmentations
-])
-
-dataset = GeoBenchDataset(
-    root="/path/to/data/classification_v1.0",
-    dataset_name="m-eurosat",
-    split="train",
-    transform=transform,
-)
-```
-
 ## Development
 
 ### Testing
