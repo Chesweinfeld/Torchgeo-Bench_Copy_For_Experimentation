@@ -1,0 +1,10 @@
+# ResNet-18 (11M params)
+# Feature dimension: 512
+# Model: resnet18
+
+_target_: src.bench_models.TimmCNNBench
+num_channels: 3
+model_name: resnet18
+pretrained: true
+global_pool: avg
+seed: null

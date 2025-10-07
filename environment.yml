@@ -1,0 +1,11 @@
+name: torchgeo-bench
+channels:
+  - conda-forge
+dependencies:
+  - python<3.13
+  - pip
+  - pip:
+      - torchgeo
+      - scikit-learn
+      - hydra-core
+      - git+https://github.com/ServiceNow/geo-bench.git

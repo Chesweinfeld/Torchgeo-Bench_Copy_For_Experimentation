@@ -1,0 +1,3 @@
+# ImageStats benchmark model configuration
+_target_: src.bench_models.ImageStatsBench
+num_channels: 3        # will be overridden per dataset automatically

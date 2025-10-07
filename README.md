@@ -1,0 +1,408 @@
+# torchgeo-bench
+
+A lightweight benchmarking framework for evaluating geospatial foundation models and feature extractors on standardized datasets.
+
+## Overview
+
+`torchgeo-bench` provides:
+
+1. **Simple Model Interface**: Define your model by implementing `forward_features(images, bboxes)` → embeddings
+2. **Automated Evaluation**: KNN-5 and Linear Probing with bootstrapped confidence intervals
+3. **GeoBench Integration**: Direct access to classification benchmark datasets
+4. **Hydra Configuration**: Flexible experiment configuration without code changes
+5. **Efficient Workflows**: Per-dataset model reinitialization handles varying input channels
+
+## Quick Start
+
+### Installation
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd torchgeo-bench
+
+# Install dependencies (Python 3.12+)
+pip install -e .
+
+# Or using conda
+conda env create -f environment.yml
+conda activate torchgeo-bench
+```
+
+### Basic Usage
+
+```bash
+# Run benchmark with default RCF model on all datasets
+python torchgeo_bench.py
+
+# Use pretrained ResNet50
+python torchgeo_bench.py model=resnet50
+
+# Benchmark on specific datasets with verbose output
+python torchgeo_bench.py \
+  dataset.names=[m-eurosat,m-forestnet] \
+  verbose=true
+
+# Quick evaluation (skip linear probing, minimal bootstrap)
+python torchgeo_bench.py \
+  eval.skip_linear=true \
+  eval.bootstrap=100
+
+# Use smaller training partition
+python torchgeo_bench.py \
+  dataset.partition=0.01x_train \
+  output=results_1pct.csv
+```
+
+## Model Interface
+
+To benchmark your own model, implement the `BenchModel` abstract base class:
+
+```python
+from src.interface import BenchModel
+import torch
+
+class MyModel(BenchModel):
+    def __init__(self, num_channels: int, **kwargs):
+        super().__init__(num_channels=num_channels)
+        # num_channels varies per dataset (e.g., 3 for RGB)
+        self.backbone = create_my_backbone(in_channels=num_channels)
+    
+    def forward_features(self, images: torch.Tensor, bboxes=None) -> torch.Tensor:
+        """
+        Args:
+            images: (B, C, H, W) tensor in [0, 1] range (after normalization)
+            bboxes: Optional (B, 4) geographic bounds (minx, miny, maxx, maxy)
+        
+        Returns:
+            embeddings: (B, K) tensor
+        """
+        return self.backbone(images)  # Must return (B, K)
+```
+
+### Register Your Model
+
+Create a config file `conf/model/mymodel.yaml`:
+
+```yaml
+_target_: mymodule.MyModel
+num_channels: 3  # placeholder, auto-set per dataset
+pretrained: true
+# ... other model kwargs
+```
+
+Then run:
+
+```bash
+python torchgeo_bench.py model=mymodel
+```
+
+## Available Models
+
+### RCF (Random Convolutional Features)
+Gaussian or empirical random features à la MOSAIKS.
+
+```bash
+# Gaussian RCF
+python torchgeo_bench.py model=rcf
+
+# Empirical RCF (samples patches from training data)
+python torchgeo_bench.py model=rcf model.mode=empirical model.features=1024
+```
+
+### Timm ResNet50
+Pretrained ImageNet ResNet50 from `timm`.
+
+```bash
+python torchgeo_bench.py model=resnet50
+```
+
+### Custom Wrappers
+See `src/bench_models.py` for examples. You can wrap any existing model (timm, torchgeo, transformers) by implementing the interface.
+
+## Datasets
+
+### Supported GeoBench Datasets
+
+| Dataset         | Classes | Task                          | Samples (default) |
+|-----------------|---------|-------------------------------|-------------------|
+| `m-eurosat`     | 10      | Land cover classification     | ~27,000           |
+| `m-forestnet`   | 12      | Forest type classification    | ~500,000          |
+| `m-so2sat`      | 17      | Local climate zones           | ~400,000          |
+| `m-pv4ger`      | 2       | Photovoltaic detection        | ~100,000          |
+| `m-brick-kiln`  | 2       | Brick kiln detection          | ~100,000          |
+
+### Data Partitions
+
+Control training set size:
+
+```bash
+# 1% of training data
+python torchgeo_bench.py dataset.partition=0.01x_train
+
+# Available: 0.01x, 0.02x, 0.05x, 0.10x, 0.20x, 0.50x, 1.00x, default
+```
+
+### Data Location
+
+By default, expects data at `/datadrive/davrob/ssdprivate/data/classification_v1.0`. Override:
+
+```bash
+export GEOBENCH_ROOT=/path/to/data/classification_v1.0
+```
+
+Or edit `src/datasets.py::DEFAULT_GEOBENCH_ROOT`.
+
+## Configuration
+
+### Hydra Configuration Structure
+
+```
+conf/
+├── config.yaml          # Main configuration
+└── model/
+    ├── rcf.yaml         # RCF model config
+    └── resnet50.yaml    # ResNet50 config
+```
+
+### Key Configuration Options
+
+```yaml
+# conf/config.yaml
+seed: 0
+device: cuda:0
+output: torchgeo_bench_results.csv
+verbose: false
+
+dataset:
+  names: all  # or [m-eurosat, m-forestnet]
+  partition: default
+  batch_size: 64
+  normalization: mean_stdev  # or min_max, none
+
+eval:
+  bootstrap: 500        # CI bootstrap samples
+  c_range: [-7, 2, 20]  # LogisticRegression C sweep (log10 scale)
+  merge_val: true       # Merge train+val for final linear model
+  skip_linear: false    # Skip linear probing (KNN only)
+```
+
+### Override Any Config
+
+```bash
+# Change device
+python torchgeo_bench.py device=cuda:1
+
+# Adjust bootstrap samples
+python torchgeo_bench.py eval.bootstrap=1000
+
+# Custom output file
+python torchgeo_bench.py output=my_results.csv
+```
+
+## Evaluation Protocol
+
+For each dataset:
+
+1. **Model Initialization**: Instantiate model with dataset's `num_channels`
+2. **Feature Extraction**: 
+   - Embed train, validation, and test sets
+   - Returns (B, K) numpy arrays
+3. **KNN-5 Evaluation**:
+   - Train on train embeddings
+   - Predict on test embeddings
+   - Bootstrap predictions 500× for 95% CI
+4. **Logistic Regression**:
+   - Sweep C ∈ [10^-7, 10^2] (20 values)
+   - Validate on validation set, pick best C
+   - Retrain on train+val (if `merge_val=true`)
+   - Evaluate on test set
+   - Bootstrap predictions 500× for 95% CI
+5. **Results**: Append two rows (knn5, linear) to CSV
+
+### Output Format
+
+```csv
+dataset,method,accuracy,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model
+m-eurosat,knn5,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFBench
+m-eurosat,linear,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench
+```
+
+## Architecture
+
+```
+torchgeo-bench/
+├── conf/                   # Hydra configs
+│   ├── config.yaml
+│   └── model/
+│       ├── rcf.yaml
+│       └── resnet50.yaml
+├── src/
+│   ├── __init__.py
+│   ├── interface.py        # BenchModel abstract base class
+│   ├── bench_models.py     # RCFBench, TimmResNet50Bench
+│   ├── datasets.py         # get_datasets() factory
+│   ├── geobench_dataset.py # Lightweight PyTorch Dataset
+│   ├── models.py           # Legacy RCF implementation
+│   ├── features.py         # (placeholder)
+│   └── utils.py            # extract_features()
+├── torchgeo_bench.py       # Main benchmark script
+├── test_geobench_dataset.py # Dataset tests
+├── pyproject.toml
+└── README.md
+```
+
+## Advanced Usage
+
+### Embedding Caching (Future)
+
+Currently embeddings are recomputed each run. Planned: cache to disk per (model, dataset, partition).
+
+### Semantic Segmentation (Future)
+
+Interface includes `forward_pixel_features()` method for dense predictions. Pending segmentation benchmark integration.
+
+### Multi-Label Tasks (Future)
+
+BigEarthNet and other multi-label datasets require metric adjustments (F1, mAP). Planned support.
+
+### Custom Transforms
+
+```python
+from src.geobench_dataset import GeoBenchDataset
+import torchvision.transforms.v2 as T
+
+transform = T.Compose([
+    T.RandomHorizontalFlip(),
+    T.RandomVerticalFlip(),
+    # ... add your augmentations
+])
+
+dataset = GeoBenchDataset(
+    root="/path/to/data/classification_v1.0",
+    dataset_name="m-eurosat",
+    split="train",
+    transform=transform,
+)
+```
+
+## Development
+
+### Testing
+
+```bash
+# Run all tests
+pytest
+
+# Test GeoBenchDataset implementation
+pytest tests/test_geobench_dataset.py -v
+
+# Compare with reference geobench library (requires geobench package)
+pytest tests/test_compare_implementations.py -v
+
+# Test specific dataset
+pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
+
+# Quick smoke test of benchmark script
+python torchgeo_bench.py \
+  dataset.names=[m-eurosat] \
+  eval.bootstrap=10 \
+  output=test.csv
+```
+
+The test suite includes:
+- **58 tests** covering all datasets, splits, and normalizations
+- **27 comparison tests** validating against reference implementation
+- All tests use small `0.01x_train` partitions for fast execution
+
+### Adding a New Model
+
+1. Implement `BenchModel` in `src/bench_models.py` or your own module
+2. Create config in `conf/model/yourmodel.yaml`
+3. Run: `python torchgeo_bench.py model=yourmodel`
+
+### Code Standards
+
+- Python 3.12+
+- Type hints (modern syntax: `list[str]` not `List[str]`)
+- Logging via `logging` module (not `print()`)
+- Pydantic v2 if using structured configs
+
+## Citation
+
+If you use this framework, please cite the GeoBench paper:
+
+```bibtex
+@article{lacoste2023geobench,
+  title={GEO-Bench: Toward Foundation Models for Earth Monitoring},
+  author={Lacoste, Alexandre and Lehmann, Nils and ...},
+  journal={NeurIPS Datasets and Benchmarks Track},
+  year={2023}
+}
+```
+
+And if using MOSAIKS-style features:
+
+```bibtex
+@article{rolf2021mosaiks,
+  title={A generalizable and accessible approach to machine learning with global satellite imagery},
+  author={Rolf, Esther and Proctor, Jonathan and ...},
+  journal={Nature Communications},
+  year={2021}
+}
+```
+
+## License
+
+[Specify license - e.g., MIT, Apache 2.0]
+
+## Contributing
+
+Contributions welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
+
+## Troubleshooting
+
+### "Dataset directory not found"
+
+Ensure `GEOBENCH_ROOT` points to `classification_v1.0` directory containing dataset folders (e.g., `m-eurosat/`, `m-forestnet/`).
+
+### "Module 'geobench' not found"
+
+Old dependency. The new implementation uses `GeoBenchDataset` which directly reads HDF5 files. No `geobench` package required.
+
+### CUDA out of memory
+
+Reduce batch size:
+
+```bash
+python torchgeo_bench.py dataset.batch_size=32
+```
+
+### Slow dataloader
+
+Adjust number of workers:
+
+```bash
+# In src/datasets.py, modify num_workers parameter
+# Or add config option (future enhancement)
+```
+
+## Roadmap
+
+- [ ] Embedding disk caching
+- [ ] Segmentation benchmark support
+- [ ] Multi-label classification metrics
+- [ ] Distributed evaluation (multi-GPU)
+- [ ] Automated hyperparameter sweeps
+- [ ] Integration with Weights & Biases / MLflow
+- [ ] Pre-computed baseline results table
+- [ ] Docker container for reproducibility
+
+## Contact
+
+[Add contact information or link to issues page]
