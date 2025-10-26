@@ -104,6 +104,7 @@ class EvaluationResult:
     n_test: int
     seed: int
     model: str
+    name: str
 
     def to_row(self) -> dict:
         return self.__dict__.copy()
@@ -220,7 +221,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
     c_values_list = [float(v) for v in c_values.tolist()]
     
     # Load existing results if resume mode is enabled
-    completed_runs: set[tuple[str, str, str]] = set()
+    completed_runs: set[tuple[str, str, str, str]] = set()
     if cfg.resume and out_exists:
         try:
             existing_df = pd.read_csv(cfg.output)
@@ -229,7 +230,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                 completed_runs.add((
                     str(row.get("dataset", "")),
                     str(row.get("method", "")),
-                    str(row.get("model", ""))
+                    str(row.get("model", "")),
+                    str(row.get("name", ""))
                 ))
             print(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
             print(f"Will skip already-computed (dataset, method, model) combinations.")
@@ -239,8 +241,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         # Check if we can skip this dataset entirely
-        knn_key = (ds_name, "knn5", cfg.model._target_)
-        linear_key = (ds_name, "linear", cfg.model._target_)
+        knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name)
+        linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name)
         skip_knn = cfg.resume and knn_key in completed_runs
         skip_linear = cfg.resume and linear_key in completed_runs
         skip_linear = skip_linear or getattr(cfg.eval, "skip_linear", False)
@@ -325,6 +327,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     n_test=len(x_test),
                     seed=cfg.seed,
                     model=cfg.model._target_,
+                    name=cfg.model.name
                 ).to_row()
             )
 
@@ -360,6 +363,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                         n_test=len(x_test),
                         seed=cfg.seed,
                         model=cfg.model._target_,
+                        name=cfg.model.name
                     ).to_row()
                 )
 
