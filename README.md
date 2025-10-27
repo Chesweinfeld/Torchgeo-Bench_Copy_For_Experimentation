@@ -133,6 +133,33 @@ Pretrained ImageNet ResNet50 from `timm`.
 python torchgeo_bench.py model=resnet50
 ```
 
+### Vision Transformers (ViT / DeiT / Swin)
+Configs generated under `conf/model/vit/` (see `create_vit_configs.py`). Vision backbones often expect a fixed spatial resolution (e.g., 224×224). You can now control resizing globally via dataset config:
+
+```bash
+# Resize all dataset tiles to 224 (bicubic by default)
+python torchgeo_bench.py model=vit/vit_base_patch16_224 dataset.image_size=224
+
+# Use bilinear interpolation
+python torchgeo_bench.py model=vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
+```
+
+If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `auto_resize` remains available as a fallback but dataset-level resizing is preferred for consistency across models.
+
+Examples:
+
+```bash
+python torchgeo_bench.py model=vit/vit_base_patch16_224
+python torchgeo_bench.py model=vit/deit_small_patch16_224 dataset.names=[m-eurosat]
+python torchgeo_bench.py model=vit/swin_base_patch4_window7_224 eval.skip_linear=true
+```
+
+To study scale effects without resizing, simply avoid setting `dataset.image_size` and (optionally) disable the model fallback:
+
+```bash
+python torchgeo_bench.py model=vit/vit_base_patch16_224 model.auto_resize=false
+```
+
 ### Custom Wrappers
 See `src/bench_models.py` for examples. You can wrap any existing model (timm, torchgeo, transformers) by implementing the interface.
 

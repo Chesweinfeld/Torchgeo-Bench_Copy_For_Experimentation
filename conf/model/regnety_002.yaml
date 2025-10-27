@@ -1,0 +1,11 @@
+# RegNetY-002 (3.2M params)
+# Feature dimension: 368
+# Model: regnety_002
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: regnety_002
+pretrained: true
+global_pool: avg
+seed: null
+name: regnety_002

@@ -1,0 +1,11 @@
+# ConvNeXt-Small (50M params)
+# Feature dimension: 768
+# Model: convnext_small
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: convnext_small
+pretrained: true
+global_pool: avg
+seed: null
+name: convnext_small

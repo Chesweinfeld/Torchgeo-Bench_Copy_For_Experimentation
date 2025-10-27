@@ -1,0 +1,11 @@
+# RegNetX-008 (7.3M params)
+# Feature dimension: 672
+# Model: regnetx_008
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: regnetx_008
+pretrained: true
+global_pool: avg
+seed: null
+name: regnetx_008

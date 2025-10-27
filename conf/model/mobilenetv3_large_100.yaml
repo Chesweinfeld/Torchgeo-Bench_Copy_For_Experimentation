@@ -1,0 +1,11 @@
+# MobileNetV3-Large (5M params)
+# Feature dimension: 960
+# Model: mobilenetv3_large_100
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: mobilenetv3_large_100
+pretrained: true
+global_pool: avg
+seed: null
+name: mobilenetv3_large_100

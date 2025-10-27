@@ -1,0 +1,11 @@
+# EfficientNet-B0 (5M params)
+# Feature dimension: 1280
+# Model: efficientnet_b0
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: efficientnet_b0
+pretrained: true
+global_pool: avg
+seed: null
+name: efficientnet_b0

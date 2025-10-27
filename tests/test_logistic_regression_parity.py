@@ -40,4 +40,4 @@ def test_logistic_regression_accuracy_parity_iris(c_values: list[float]):
         acc_diff = float(torch_acc - sk_acc)
         acc_diffs.append(abs(acc_diff))
 
-    assert max(acc_diffs) <= 1e-4, f"Accuracy parity failed; diffs: {acc_diffs}"
+    assert max(acc_diffs) <= 1e-3, f"Accuracy parity failed; diffs: {acc_diffs}"

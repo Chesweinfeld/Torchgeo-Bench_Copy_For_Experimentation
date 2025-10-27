@@ -5,6 +5,8 @@ the lightweight GeoBenchDataset class.
 """
 
 from torch.utils.data import DataLoader
+import torch
+import torch.nn.functional as F
 
 from .geobench_dataset import GeoBenchDataset
 
@@ -41,6 +43,8 @@ def get_datasets(
     only_return_datasets: bool = False,
     geobench_root: str | None = None,
     num_workers: int = 8,
+    image_size: int | None = None,
+    interpolation: str = "bicubic",
 ):
     """Load GeoBench dataset splits and dataloaders.
 
@@ -71,7 +75,29 @@ def get_datasets(
     else:
         normalize = False
 
-    # Create datasets
+    # Optional resize transform
+    resize_transform = None
+    if image_size is not None:
+        interp_mode = {
+            "bicubic": "bicubic",
+            "bilinear": "bilinear",
+            "nearest": "nearest",
+        }.get(interpolation, "bicubic")
+
+        def _resize(sample: dict) -> dict:
+            img: torch.Tensor = sample["image"]
+            h, w = img.shape[-2], img.shape[-1]
+            if h != image_size or w != image_size:
+                # Use float32 already; add batch dim for F.interpolate
+                img = img.unsqueeze(0)
+                img = F.interpolate(img, size=(image_size, image_size), mode=interp_mode, align_corners=False if interp_mode in ("bicubic", "bilinear") else None)
+                sample["image"] = img.squeeze(0)
+            return sample
+
+        resize_transform = _resize
+
+    # Compose transform(s) if needed (currently single resize)
+    transform_callable = resize_transform
     train_dataset = GeoBenchDataset(
         root=geobench_root,
         dataset_name=dataset_name,
@@ -79,6 +105,7 @@ def get_datasets(
         partition=partition_name,
         bands=("red", "green", "blue"),
         normalize=normalize,
+        transform=transform_callable,
     )
 
     valid_dataset = GeoBenchDataset(
@@ -88,6 +115,7 @@ def get_datasets(
         partition="default",  # validation always uses default partition
         bands=("red", "green", "blue"),
         normalize=normalize,
+        transform=transform_callable,
     )
 
     test_dataset = GeoBenchDataset(
@@ -97,6 +125,7 @@ def get_datasets(
         partition="default",  # test always uses default partition
         bands=("red", "green", "blue"),
         normalize=normalize,
+        transform=transform_callable,
     )
 
     # Create dataloaders

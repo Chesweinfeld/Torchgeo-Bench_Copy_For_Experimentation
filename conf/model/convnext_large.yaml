@@ -1,0 +1,7 @@
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: convnext_large
+pretrained: true
+global_pool: avg
+seed: null
+name: convnext_large

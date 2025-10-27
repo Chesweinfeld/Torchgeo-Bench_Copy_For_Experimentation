@@ -1,34 +1,7 @@
-"""Benchmark script for torchgeo-bench.
-
-Usage example:
-  python torchgeo_bench.py \
-    --model src.models:RCF --model-args "in_channels=3,features=512,kernel_size=3,mode=gaussian,stats_mode=mean" \
-    --datasets m-forestnet,m-eurosat \
-    --output results.csv
-
-This will:
-  * Load each requested dataset split (train/valid/test)
-  * Extract embeddings for train, val, test
-  * Run KNN5 evaluation (train -> test) with bootstrap CI
-  * Sweep LogisticRegression C values using validation set, pick best, retrain
-    on train+val, evaluate on test, bootstrap CI
-  * Append two rows (KNN + Linear) per dataset to the CSV.
-
-Assumptions / Notes:
-  * Datasets are single-label classification tasks with integer labels.
-  * Model's ``forward_features`` returns (B, K) embeddings.
-  * If you would prefer NOT to merge train+val before the final logistic model
-    test evaluation, pass ``--no-merge-val``.
-"""
+"""Benchmark script for torchgeo-bench."""
 
 import os
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv("conf.env")
-except ImportError:
-    pass  # dotenv optional
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -38,22 +11,16 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from sklearn.linear_model import LogisticRegression
+from src.linear import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
-from src.interface import BenchModel
-from src.utils import extract_features  # re-use for now
+from src.models.interface import BenchModel
+from src.utils import extract_features
 
-try:  # optional acceleration (Intel / sklearnex)
-    from sklearnex import patch_sklearn  # type: ignore
-
-    patch_sklearn()
-except Exception:  # pragma: no cover - optional
-    pass
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -124,11 +91,19 @@ def evaluate_knn(
     y_test: np.ndarray,
     seed: int,
     n_bootstrap: int,
+    verbose: bool = False,
 ) -> tuple[float, float, float]:
+    if verbose:
+        logger.info(
+            f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap})"
+        )
     clf = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
     clf.fit(x_train, y_train)
     preds = clf.predict(x_test)
-    return bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
+    acc_mean, lo, hi = bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
+    if verbose:
+        logger.info(f"[KNN] Test accuracy={acc_mean:.4f} (CI {lo:.4f}-{hi:.4f})")
+    return acc_mean, lo, hi
 
 
 def evaluate_logistic(
@@ -142,63 +117,86 @@ def evaluate_logistic(
     seed: int,
     n_bootstrap: int,
     merge_val: bool,
+    device: str,
+    verbose: bool = False,
 ) -> tuple[float, float, float, float]:
-    best_c = None
+    """Sweep C values using validation set, then retrain and evaluate.
+
+    Notes:
+        - Standardization was removed from the core LogisticRegression; we keep
+          embeddings raw here for consistency.
+        - Inputs are numpy arrays; they are converted to torch tensors once.
+        - Validation sweep trains separate lightweight models for each C.
+        - Final model is retrained (optionally on train+val) with higher max_iter.
+    """
+    best_c: float | None = None
     best_val_acc = -1.0
-    # Standardize
-    scaler = StandardScaler()
-    x_train_s = scaler.fit_transform(x_train)
-    x_val_s = scaler.transform(x_val)
-    x_test_s = scaler.transform(x_test)
-    for c in c_values:
+
+    # Convert once to tensors (int64 labels for classification)
+    x_train_tensor = torch.from_numpy(x_train)
+    y_train_tensor = torch.from_numpy(y_train).long()
+    x_val_tensor = torch.from_numpy(x_val)
+    y_val_tensor = torch.from_numpy(y_val).long()
+    x_test_tensor = torch.from_numpy(x_test)
+    y_test_tensor = torch.from_numpy(y_test).long()
+
+    if verbose:
+        logger.info(
+            f"[LogReg] C sweep start over {len(c_values)} values (train={len(x_train)}, val={len(x_val)})"
+        )
+        c_value_iterator = tqdm(c_values, desc="C values", leave=False)
+    else:
+        c_value_iterator = c_values
+
+    for idx, c in enumerate(c_value_iterator):
         model = LogisticRegression(
             C=c,
             max_iter=2000,
-            n_jobs=-1,
             tol=1e-6,
-            class_weight=None,
             random_state=seed,
+            device=device,
         )
-        model.fit(x_train_s, y_train)
-        val_pred = model.predict(x_val_s)
+        model.fit(x_train_tensor, y_train_tensor)
+        val_pred = model.predict(x_val_tensor)
         acc_val = accuracy_score(y_val, val_pred)
+        if verbose and (idx < 10 or idx % 50 == 0):
+            logger.info(f"[LogReg] C={c:.4g} val_acc={acc_val:.4f}")
         if acc_val > best_val_acc:
             best_val_acc = acc_val
             best_c = c
-    assert best_c is not None
-    # Retrain on train (+ val) for final test evaluation if requested
+
+    assert best_c is not None, "C sweep failed to select a value"
+    if verbose:
+        logger.info(f"[LogReg] Best C={best_c:.4g} val_acc={best_val_acc:.4f}")
+
+    # Prepare final training tensors
     if merge_val:
-        x_final = np.concatenate([x_train, x_val], axis=0)
-        y_final = np.concatenate([y_train, y_val], axis=0)
-        scaler = StandardScaler()
-        x_final_s = scaler.fit_transform(x_final)
-        x_test_s = scaler.transform(x_test)
-        final_model = LogisticRegression(
-            C=best_c,
-            max_iter=4000,
-            n_jobs=-1,
-            tol=1e-6,
-            random_state=seed,
-        )
-        final_model.fit(x_final_s, y_final)
-        test_preds = final_model.predict(x_test_s)
+        x_final_np = np.concatenate([x_train, x_val], axis=0)
+        y_final_np = np.concatenate([y_train, y_val], axis=0)
+        x_final = torch.from_numpy(x_final_np)
+        y_final = torch.from_numpy(y_final_np).long()
     else:
-        # Fit only on train (already evaluated above)
-        scaler = StandardScaler()
-        x_train_s = scaler.fit_transform(x_train)
-        x_test_s = scaler.transform(x_test)
-        final_model = LogisticRegression(
-            C=best_c,
-            max_iter=4000,
-            n_jobs=-1,
-            tol=1e-6,
-            random_state=seed,
-        )
-        final_model.fit(x_train_s, y_train)
-        test_preds = final_model.predict(x_test_s)
+        x_final = x_train_tensor
+        y_final = y_train_tensor
+
+    final_model = LogisticRegression(
+        C=best_c,
+        max_iter=4000,
+        tol=1e-6,
+        random_state=seed,
+        device=device,
+    )
+    final_model.fit(x_final, y_final)
+    test_preds = final_model.predict(x_test_tensor)
+
     acc, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
+    if verbose:
+        logger.info(
+            f"[LogReg] Test accuracy={acc:.4f} (CI {lo:.4f}-{hi:.4f}) using C={best_c:.4g}; train_final={len(x_final)} test={len(x_test)}"
+        )
     return acc, lo, hi, float(best_c)
 
+# (logging already imported above)
 
 # ---------------------------------------------------------------------------
 # Main
@@ -258,6 +256,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             batch_size=cfg.dataset.batch_size,
             normalization=cfg.dataset.normalization,
             return_val=True,
+            image_size=getattr(cfg.dataset, "image_size", None),
+            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
         )
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             print(f"Skipping dataset {ds_name} (unexpected return)")
@@ -278,7 +278,6 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             and str(cfg.model.mode) == "empirical"
         )
         if needs_dataset:
-            # Bypass instantiate to inject dataset safely.
             target_path: str = cfg.model._target_
             module_name, class_name = target_path.rsplit(".", 1)
             module = __import__(module_name, fromlist=[class_name])
@@ -308,10 +307,9 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
         feature_dim = x_train.shape[1]
 
-        # KNN evaluation (already checked skip_knn above)
         if not skip_knn:
             knn_acc, knn_lo, knn_hi = evaluate_knn(
-                x_train, y_train, x_test, y_test, cfg.seed, cfg.eval.bootstrap
+                x_train, y_train, x_test, y_test, cfg.seed, cfg.eval.bootstrap, verbose=cfg.verbose
             )
             all_rows.append(
                 EvaluationResult(
@@ -327,45 +325,46 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     n_test=len(x_test),
                     seed=cfg.seed,
                     model=cfg.model._target_,
-                    name=cfg.model.name
+                    name=cfg.model.name,
                 ).to_row()
             )
 
-        # Linear evaluation (already checked skip_linear above)
         if not skip_linear:
-                if cfg.verbose:
-                    print(
-                        f"[{ds_name}] Running LogisticRegression sweep over {len(c_values_list)} C values..."
-                    )
-                lin_acc, lin_lo, lin_hi, best_c = evaluate_logistic(
-                    x_train,
-                    y_train,
-                    x_val,
-                    y_val,
-                    x_test,
-                    y_test,
-                    c_values=c_values_list,
+            if cfg.verbose:
+                print(
+                    f"[{ds_name}] Running LogisticRegression sweep over {len(c_values_list)} C values..."
+                )
+            lin_acc, lin_lo, lin_hi, best_c = evaluate_logistic(
+                x_train,
+                y_train,
+                x_val,
+                y_val,
+                x_test,
+                y_test,
+                c_values=c_values_list,
+                seed=cfg.seed,
+                n_bootstrap=cfg.eval.bootstrap,
+                merge_val=cfg.eval.merge_val,
+                device=cfg.device,
+                verbose=cfg.verbose,
+            )
+            all_rows.append(
+                EvaluationResult(
+                    dataset=ds_name,
+                    method="linear",
+                    accuracy=lin_acc,
+                    ci_lower=lin_lo,
+                    ci_upper=lin_hi,
+                    feature_dim=feature_dim,
+                    best_c=best_c,
+                    n_train=len(x_train),
+                    n_val=len(x_val),
+                    n_test=len(x_test),
                     seed=cfg.seed,
-                    n_bootstrap=cfg.eval.bootstrap,
-                    merge_val=cfg.eval.merge_val,
-                )
-                all_rows.append(
-                    EvaluationResult(
-                        dataset=ds_name,
-                        method="linear",
-                        accuracy=lin_acc,
-                        ci_lower=lin_lo,
-                        ci_upper=lin_hi,
-                        feature_dim=feature_dim,
-                        best_c=best_c,
-                        n_train=len(x_train),
-                        n_val=len(x_val),
-                        n_test=len(x_test),
-                        seed=cfg.seed,
-                        model=cfg.model._target_,
-                        name=cfg.model.name
-                    ).to_row()
-                )
+                    model=cfg.model._target_,
+                    name=cfg.model.name,
+                ).to_row()
+            )
 
         df = pd.DataFrame(all_rows)
         df.to_csv(

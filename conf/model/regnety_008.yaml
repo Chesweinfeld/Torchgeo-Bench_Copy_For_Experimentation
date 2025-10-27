@@ -1,0 +1,11 @@
+# RegNetY-008 (6.4M params)
+# Feature dimension: 768
+# Model: regnety_008
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: regnety_008
+pretrained: true
+global_pool: avg
+seed: null
+name: regnety_008
