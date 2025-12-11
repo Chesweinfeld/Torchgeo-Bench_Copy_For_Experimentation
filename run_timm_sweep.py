@@ -22,15 +22,14 @@ Usage examples:
 """
 
 import argparse
+import math
 import subprocess
 import sys
-from pathlib import Path
-from typing import Iterable
-import time
-import math
 import threading
-from queue import Queue, Empty
-
+import time
+from pathlib import Path
+from queue import Empty, Queue
+from typing import Iterable
 
 DEVICES = [0, 1, 2, 3, 4, 5, 6, 7]  # List of device IDs (integers) for GPU assignment
 
@@ -56,7 +55,9 @@ def discover_model_configs(root: Path) -> list[str]:
     return sorted(models)
 
 
-def build_command(model: str, output: str, datasets: list[str] | None, resume: bool, verbose: bool, device: int) -> list[str]:
+def build_command(
+    model: str, output: str, datasets: list[str] | None, resume: bool, verbose: bool, device: int
+) -> list[str]:
     cmd = [
         "python",
         "torchgeo_bench.py",
@@ -65,7 +66,7 @@ def build_command(model: str, output: str, datasets: list[str] | None, resume: b
         f"device={device}",
         f"verbose={verbose}",
         f"resume={resume}",
-        #"eval.skip_linear=True",  # keep sweep fast
+        # "eval.skip_linear=True",  # keep sweep fast
     ]
     if datasets:
         dataset_str = "[" + ",".join(datasets) + "]"
@@ -74,7 +75,7 @@ def build_command(model: str, output: str, datasets: list[str] | None, resume: b
 
 
 def run_job(cmd: list[str]) -> int:
-    print(f"\n{'='*60}\nLaunching: {' '.join(cmd)}\n{'='*60}")
+    print(f"\n{'=' * 60}\nLaunching: {' '.join(cmd)}\n{'=' * 60}")
     result = subprocess.run(cmd)
     return result.returncode
 
@@ -111,9 +112,9 @@ def main():
         help="Enable verbose output",
     )
     # Removed --devices / --max-parallel / --poll-interval; use DEVICES global.
-    
+
     args = parser.parse_args()
-    
+
     repo_root = Path(__file__).parent
     discovered = discover_model_configs(repo_root)
     if args.models:
@@ -122,21 +123,25 @@ def main():
         missing = [m for m in requested if m not in discovered]
         if missing:
             print(f"Warning: {len(missing)} requested models not found in configs: {missing}")
-        models = [m for m in requested if m in discovered] + [m for m in requested if m not in discovered]
+        models = [m for m in requested if m in discovered] + [
+            m for m in requested if m not in discovered
+        ]
     else:
         models = discovered
 
     devices = DEVICES
-    
+
     print("Benchmark Sweep Configuration:")
-    sample_models = ", ".join(models[:3]) + (f", ... and {len(models)-3} more" if len(models) > 3 else "")
+    sample_models = ", ".join(models[:3]) + (
+        f", ... and {len(models) - 3} more" if len(models) > 3 else ""
+    )
     print(f"  Models: {len(models)} ({sample_models})")
     print(f"  Datasets: {'all' if not args.datasets else ', '.join(args.datasets)}")
     print(f"  Output: {args.output}")
     print(f"  Resume: {not args.no_resume}")
     print(f"  Devices: {devices} (threads={len(devices)})")
     print()
-    
+
     # Threaded dispatch: one worker thread per device
     failed: list[str] = []
     durations: dict[str, float] = {}
@@ -176,9 +181,9 @@ def main():
             results[model] = rc
             if rc != 0:
                 failed.append(model)
-                print(f"[FAILED] {model} rc={rc} time={dur/60:.2f}m")
+                print(f"[FAILED] {model} rc={rc} time={dur / 60:.2f}m")
             else:
-                print(f"[DONE]  {model} time={dur/60:.2f}m")
+                print(f"[DONE]  {model} time={dur / 60:.2f}m")
             job_queue.task_done()
 
     threads: list[threading.Thread] = []
@@ -190,11 +195,11 @@ def main():
     # Wait for completion
     for t in threads:
         t.join()
-    
+
     # Summary
-    print(f"\n\n{'='*60}")
+    print(f"\n\n{'=' * 60}")
     print("Sweep Summary")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Total models: {len(models)}")
     print(f"Successful: {len(models) - len(failed)}")
     print(f"Failed: {len(failed)}")
@@ -204,13 +209,13 @@ def main():
     if models:
         successful = [m for m in models if m not in failed]
         avg_time = sum(durations[m] for m in successful) / max(1, len(successful))
-        print(f"Avg time per successful model: {avg_time/60:.2f} min")
+        print(f"Avg time per successful model: {avg_time / 60:.2f} min")
         fastest = sorted(successful, key=lambda m: durations[m])[:3]
         slowest = sorted(successful, key=lambda m: durations[m], reverse=True)[:3]
         if successful:
-            print(f"Fastest: {', '.join(f'{m} ({durations[m]/60:.1f}m)' for m in fastest)}")
-            print(f"Slowest: {', '.join(f'{m} ({durations[m]/60:.1f}m)' for m in slowest)}")
-    
+            print(f"Fastest: {', '.join(f'{m} ({durations[m] / 60:.1f}m)' for m in fastest)}")
+            print(f"Slowest: {', '.join(f'{m} ({durations[m] / 60:.1f}m)' for m in slowest)}")
+
     if failed:
         sys.exit(1)
     print(f"Results appended to: {args.output}")

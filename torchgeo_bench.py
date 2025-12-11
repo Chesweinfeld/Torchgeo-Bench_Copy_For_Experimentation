@@ -1,9 +1,9 @@
 """Benchmark script for torchgeo-bench."""
 
-import os
-import io
 import fcntl
+import io
 import logging
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -13,12 +13,12 @@ import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from src.linear import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.neighbors import KNeighborsClassifier
 from tqdm import tqdm
 
 from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from src.linear import LogisticRegression
 from src.models.interface import BenchModel
 from src.utils import extract_features
 
@@ -198,6 +198,7 @@ def evaluate_logistic(
         )
     return acc, lo, hi, float(best_c)
 
+
 # (logging already imported above)
 
 # ---------------------------------------------------------------------------
@@ -240,11 +241,12 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             f.flush()
             os.fsync(f.fileno())
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
     all_rows: list[dict] = []
     c_start, c_stop, c_num = cfg.eval.c_range
     c_values = 10 ** np.linspace(float(c_start), float(c_stop), int(c_num))
     c_values_list = [float(v) for v in c_values.tolist()]
-    
+
     # Load existing results if resume mode is enabled
     completed_runs: set[tuple[str, str, str, str]] = set()
     if cfg.resume and os.path.exists(output_path):
@@ -252,12 +254,14 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             existing_df = pd.read_csv(cfg.output)
             # Track (dataset, method, model) tuples that are already computed
             for _, row in existing_df.iterrows():
-                completed_runs.add((
-                    str(row.get("dataset", "")),
-                    str(row.get("method", "")),
-                    str(row.get("model", "")),
-                    str(row.get("name", ""))
-                ))
+                completed_runs.add(
+                    (
+                        str(row.get("dataset", "")),
+                        str(row.get("method", "")),
+                        str(row.get("model", "")),
+                        str(row.get("name", "")),
+                    )
+                )
             print(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
             print(f"Will skip already-computed (dataset, method, model) combinations.")
         except Exception as e:
@@ -271,12 +275,12 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         skip_knn = cfg.resume and knn_key in completed_runs
         skip_linear = cfg.resume and linear_key in completed_runs
         skip_linear = skip_linear or getattr(cfg.eval, "skip_linear", False)
-        
+
         if skip_knn and skip_linear:
             if cfg.verbose:
                 print(f"[{ds_name}] Skipping entirely (all methods already computed)")
             continue
-        
+
         result = get_datasets(
             dataset_name=ds_name,
             partition_name=cfg.dataset.partition,

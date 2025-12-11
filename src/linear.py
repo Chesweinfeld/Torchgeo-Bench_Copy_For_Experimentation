@@ -43,11 +43,11 @@ class LogisticRegression:
         batch_size: int = 1024,
         solver: str = "lbfgs",
         tol: float = 1e-4,
-        patience: int = 1,            # only used by Adam path now
+        patience: int = 1,  # only used by Adam path now
         random_state: int | None = None,
         device: str | torch.device | None = None,
         verbose: bool = False,
-        use_tf32: bool = True,         # enable TF32 on CUDA for speed
+        use_tf32: bool = True,  # enable TF32 on CUDA for speed
     ) -> None:
         if C <= 0:
             raise ValueError("C must be > 0.")
@@ -134,11 +134,12 @@ class LogisticRegression:
             optimizer = torch.optim.LBFGS(
                 model.parameters(),
                 lr=self.lr,
-                max_iter=self.max_iter,           # let LBFGS run all iterations internally
+                max_iter=self.max_iter,  # let LBFGS run all iterations internally
                 history_size=10,
-                line_search_fn="strong_wolfe",    # usually better steps
+                line_search_fn="strong_wolfe",  # usually better steps
                 tolerance_grad=1e-7,
-                tolerance_change=self.tol * 0.1,  # small but positive; mirrors early-stop-ish behavior
+                tolerance_change=self.tol
+                * 0.1,  # small but positive; mirrors early-stop-ish behavior
             )
 
             def closure() -> Tensor:
@@ -266,5 +267,3 @@ class LogisticRegression:
             f"use_tf32={self.use_tf32}"
             ")"
         )
-
-

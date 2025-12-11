@@ -7,13 +7,19 @@ A lightweight benchmarking framework for evaluating geospatial foundation models
 Before running any benchmarks, download the GeoBench dataset:
 
 ```bash
-python torchgeo_bench_download.py
+torchgeo-bench download
 ```
 
 This will download and extract the dataset to the default directory `data/`. You can specify a custom location with:
 
 ```bash
-python torchgeo_bench_download.py --output-dir /your/path/to/data
+torchgeo-bench download --output-dir /your/path/to/data
+```
+
+Alternatively, you can still use the standalone script:
+
+```bash
+python torchgeo_bench_download.py
 ```
 
 ## Overview
@@ -46,28 +52,26 @@ conda activate torchgeo-bench
 ### Basic Usage
 
 ```bash
-# Run benchmark with default RCF model on all datasets
-
-# Run benchmark (expects GeoBench data in 'data/')
-python torchgeo_bench.py
+# Run benchmark with default RCF model on all datasets (expects GeoBench data in 'data/')
+torchgeo-bench run
 
 # Use pretrained ResNet50
-python torchgeo_bench.py model=resnet50
+torchgeo-bench run model=resnet50
 
 # Benchmark on specific datasets with verbose output
-python torchgeo_bench.py \
-  dataset.names=[m-eurosat,m-forestnet] \
-  verbose=true
+torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
 
 # Quick evaluation (skip linear probing, minimal bootstrap)
-python torchgeo_bench.py \
-  eval.skip_linear=true \
-  eval.bootstrap=100
+torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
 
 # Use smaller training partition
-python torchgeo_bench.py \
-  dataset.partition=0.01x_train \
-  output=results_1pct.csv
+torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
+```
+
+Alternatively, you can still use the standalone script with Hydra directly:
+
+```bash
+python torchgeo_bench.py model=resnet50
 ```
 
 ## Model Interface
@@ -110,7 +114,7 @@ pretrained: true
 Then run:
 
 ```bash
-python torchgeo_bench.py model=mymodel
+torchgeo-bench run model=mymodel
 ```
 
 ## Available Models
@@ -120,17 +124,17 @@ Gaussian or empirical random features à la MOSAIKS.
 
 ```bash
 # Gaussian RCF
-python torchgeo_bench.py model=rcf
+torchgeo-bench run model=rcf
 
 # Empirical RCF (samples patches from training data)
-python torchgeo_bench.py model=rcf model.mode=empirical model.features=1024
+torchgeo-bench run model=rcf model.mode=empirical model.features=1024
 ```
 
 ### Timm ResNet50
 Pretrained ImageNet ResNet50 from `timm`.
 
 ```bash
-python torchgeo_bench.py model=resnet50
+torchgeo-bench run model=resnet50
 ```
 
 ### Vision Transformers (ViT / DeiT / Swin)
@@ -138,10 +142,10 @@ Configs generated under `conf/model/vit/` (see `create_vit_configs.py`). Vision 
 
 ```bash
 # Resize all dataset tiles to 224 (bicubic by default)
-python torchgeo_bench.py model=vit/vit_base_patch16_224 dataset.image_size=224
+torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224
 
 # Use bilinear interpolation
-python torchgeo_bench.py model=vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
+torchgeo-bench run model=vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
 ```
 
 If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `auto_resize` remains available as a fallback but dataset-level resizing is preferred for consistency across models.
@@ -149,15 +153,15 @@ If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `
 Examples:
 
 ```bash
-python torchgeo_bench.py model=vit/vit_base_patch16_224
-python torchgeo_bench.py model=vit/deit_small_patch16_224 dataset.names=[m-eurosat]
-python torchgeo_bench.py model=vit/swin_base_patch4_window7_224 eval.skip_linear=true
+torchgeo-bench run model=vit/vit_base_patch16_224
+torchgeo-bench run model=vit/deit_small_patch16_224 dataset.names=[m-eurosat]
+torchgeo-bench run model=vit/swin_base_patch4_window7_224 eval.skip_linear=true
 ```
 
 To study scale effects without resizing, simply avoid setting `dataset.image_size` and (optionally) disable the model fallback:
 
 ```bash
-python torchgeo_bench.py model=vit/vit_base_patch16_224 model.auto_resize=false
+torchgeo-bench run model=vit/vit_base_patch16_224 model.auto_resize=false
 ```
 
 ### Custom Wrappers
@@ -181,7 +185,7 @@ Control training set size:
 
 ```bash
 # 1% of training data
-python torchgeo_bench.py dataset.partition=0.01x_train
+torchgeo-bench run dataset.partition=0.01x_train
 
 # Available: 0.01x, 0.02x, 0.05x, 0.10x, 0.20x, 0.50x, 1.00x, default
 ```
@@ -224,13 +228,13 @@ eval:
 
 ```bash
 # Change device
-python torchgeo_bench.py device=cuda:1
+torchgeo-bench run device=cuda:1
 
 # Adjust bootstrap samples
-python torchgeo_bench.py eval.bootstrap=1000
+torchgeo-bench run eval.bootstrap=1000
 
 # Custom output file
-python torchgeo_bench.py output=my_results.csv
+torchgeo-bench run output=my_results.csv
 ```
 
 ## Evaluation Protocol
@@ -279,10 +283,7 @@ pytest tests/test_compare_implementations.py -v
 pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 
 # Quick smoke test of benchmark script
-python torchgeo_bench.py \
-  dataset.names=[m-eurosat] \
-  eval.bootstrap=10 \
-  output=test.csv
+torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
 **Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set the environment variable `GEOBENCH_ROOT` to the full path of your dataset root before running tests:
@@ -303,7 +304,7 @@ The test suite includes:
 
 1. Implement `BenchModel` in `src/bench_models.py` or your own module
 2. Create config in `conf/model/yourmodel.yaml`
-3. Run: `python torchgeo_bench.py model=yourmodel`
+3. Run: `torchgeo-bench run model=yourmodel`
 
 ### Code Standards
 
@@ -364,7 +365,7 @@ Old dependency. The new implementation uses `GeoBenchDataset` which directly rea
 Reduce batch size:
 
 ```bash
-python torchgeo_bench.py dataset.batch_size=32
+torchgeo-bench run dataset.batch_size=32
 ```
 
 ### Slow dataloader

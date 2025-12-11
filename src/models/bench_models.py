@@ -1,7 +1,7 @@
 import torch
 
-from .models import RCF
 from .interface import BenchModel
+from .models import RCF
 
 
 class RCFBench(BenchModel):
@@ -19,7 +19,7 @@ class RCFBench(BenchModel):
         stats_mode: str = "mean",
         seed: int | None = None,
         dataset=None,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
         self.rcf = RCF(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from typing import Optional
-from .interface import BenchModel
 
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import timm
+
+from .interface import BenchModel
 
 
 class TimmPatchBenchModel(BenchModel):
@@ -67,8 +68,8 @@ class TimmPatchBenchModel(BenchModel):
 
         # Determine default input size from timm config; store square size.
         # timm default_cfg has key 'input_size' like (3, 224, 224)
-        default_cfg = getattr(self.backbone, 'default_cfg', {}) or {}
-        cfg_input_size = default_cfg.get('input_size', None)
+        default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
+        cfg_input_size = default_cfg.get("input_size", None)
         inferred_size: Optional[int] = None
         if isinstance(cfg_input_size, (list, tuple)) and len(cfg_input_size) == 3:
             # (C, H, W)
@@ -79,6 +80,7 @@ class TimmPatchBenchModel(BenchModel):
         if self.auto_resize and self.target_size is None:
             # Warn user once that resize cannot happen automatically.
             import logging
+
             logging.getLogger(__name__).warning(
                 "auto_resize=True but target_size could not be inferred for %s; disabling auto-resize.",
                 model_name,

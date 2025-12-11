@@ -4,9 +4,9 @@ This module provides a unified interface to load GeoBench datasets using
 the lightweight GeoBenchDataset class.
 """
 
-from torch.utils.data import DataLoader
 import torch
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from .geobench_dataset import GeoBenchDataset
 
@@ -90,7 +90,12 @@ def get_datasets(
             if h != image_size or w != image_size:
                 # Use float32 already; add batch dim for F.interpolate
                 img = img.unsqueeze(0)
-                img = F.interpolate(img, size=(image_size, image_size), mode=interp_mode, align_corners=False if interp_mode in ("bicubic", "bilinear") else None)
+                img = F.interpolate(
+                    img,
+                    size=(image_size, image_size),
+                    mode=interp_mode,
+                    align_corners=False if interp_mode in ("bicubic", "bilinear") else None,
+                )
                 sample["image"] = img.squeeze(0)
             return sample
 

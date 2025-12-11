@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Download and extract the GeoBench dataset from Hugging Face."""
 
-
 import argparse
 import zipfile
 from pathlib import Path
@@ -12,7 +11,9 @@ from tqdm import tqdm
 DATASET_REPO = "recursix/geo-bench-1.0"
 
 
-def decompress_zip_with_progress(zip_file_path: Path, extract_to_folder: Path | None = None) -> None:
+def decompress_zip_with_progress(
+    zip_file_path: Path, extract_to_folder: Path | None = None
+) -> None:
     """Decompress a zip file with a progress bar and remove the zip file.
 
     Args:
@@ -24,7 +25,9 @@ def decompress_zip_with_progress(zip_file_path: Path, extract_to_folder: Path | 
     with zipfile.ZipFile(zip_file_path, "r") as zip_ref:
         file_names = zip_ref.namelist()
 
-        with tqdm(total=len(file_names), unit="file", desc=f"Extracting {zip_file_path.name}") as pbar:
+        with tqdm(
+            total=len(file_names), unit="file", desc=f"Extracting {zip_file_path.name}"
+        ) as pbar:
             for file in file_names:
                 zip_ref.extract(file, extract_to_folder)
                 pbar.update(1)
@@ -42,7 +45,6 @@ def download_benchmark(local_directory: Path | str, force: bool = False) -> None
         force: Force re-download of files even if they already exist.
     """
     local_directory = Path(local_directory)
-
 
     local_directory.mkdir(parents=True, exist_ok=True)
     print(f"Downloading GeoBench dataset to: {local_directory}")

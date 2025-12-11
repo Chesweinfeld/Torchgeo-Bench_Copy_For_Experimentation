@@ -49,6 +49,7 @@ def extract_features(model, dataloader, device, transforms=None, verbose=True):
 
     return x_all, y_all
 
+
 def extract_features_transformers(model, dataloader, device, processor=None, verbose=True):
     x_all = []
     y_all = []
@@ -61,13 +62,13 @@ def extract_features_transformers(model, dataloader, device, processor=None, ver
         images = batch["image"].to(device)
         labels = batch["label"].numpy()
 
-        #images = processor(images=images, return_tensors="pt")
+        # images = processor(images=images, return_tensors="pt")
 
         images = processor(images)
-        #images = {'pixel_values': images}
+        # images = {'pixel_values': images}
         with torch.no_grad():
             with torch.inference_mode():
-                #features = model(**images)
+                # features = model(**images)
                 features = model(images)
 
         # last_hidden_states = features.last_hidden_state

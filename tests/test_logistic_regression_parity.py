@@ -27,7 +27,9 @@ def test_logistic_regression_accuracy_parity_iris(c_values: list[float]):
     acc_diffs = []
 
     for C in c_values:
-        torch_clf = LogisticRegression(C=C, max_iter=500, solver="lbfgs", device=device, verbose=False)
+        torch_clf = LogisticRegression(
+            C=C, max_iter=500, solver="lbfgs", device=device, verbose=False
+        )
         torch_clf.fit(X, y)
         torch_preds = torch_clf.predict(X)
         torch_acc = (torch_preds == y_np).mean()
