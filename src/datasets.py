@@ -132,8 +132,6 @@ def _get_datasets_v2(
 
     # currently only support mean-stdev normalization for V2, which happens by default
     def load_split(split):
-        import pdb
-        pdb.set_trace()
         ds = dataset_cls(
             root=os.path.join(root, dataset_name),
             split=split,
@@ -277,6 +275,7 @@ def get_datasets(
         }.get(interpolation, "bicubic")
 
         def _resize(sample: dict) -> dict:
+            """Resize image in sample to desired size."""
             img: torch.Tensor = sample["image"]
             h, w = img.shape[-2], img.shape[-1]
             if h != image_size or w != image_size:
@@ -288,6 +287,18 @@ def get_datasets(
                     align_corners=False if interp_mode in ("bicubic", "bilinear") else None,
                 )
                 sample["image"] = img.squeeze(0)
+            if "mask" in sample:
+                # assuming mask is single-channel with class indices
+                mask: torch.Tensor = sample["mask"]
+                h_m, w_m = mask.shape[-2], mask.shape[-1]
+                if h_m != image_size or w_m != image_size:
+                    mask = mask.unsqueeze(0).unsqueeze(0)
+                    mask = F.interpolate(
+                        mask,
+                        size=(image_size, image_size),
+                        mode="nearest",
+                    )
+                    sample["mask"] = mask.squeeze(0).squeeze(0)
             return sample
 
         resize_transform = _resize
