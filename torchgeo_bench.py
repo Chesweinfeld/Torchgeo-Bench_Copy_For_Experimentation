@@ -222,26 +222,38 @@ def evaluate_segmentation(
     num_classes: int,
     device: torch.device,
 ) -> tuple[float, int]:
+    """Evaluate segmentation performance using a segmentation probe and solver."""
+
+    # merge with model specific eval config if present
+    eval_cfg = cfg.eval
+    if "eval" in cfg.model and cfg.model.eval is not None:
+        eval_cfg = OmegaConf.merge(eval_cfg, cfg.model.eval)
+    if "segmentation" not in eval_cfg:
+        raise ValueError("Segmentation evaluation config missing for the model.")
+
+    if "segmentation" not in cfg.eval:
+        raise ValueError("Segmentation evaluation config missing for the model.")
+    
     probe = SegmentationProbe(
         backbone=model,
-        layer_names=cfg.eval.segmentation.layers,
+        layer_names=eval_cfg.segmentation.layers,
         num_classes=num_classes,
         in_channels=cfg.model.num_channels,
-        head_type=cfg.eval.segmentation.head_type,
+        head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
     )
 
     solver = SegmentationSolver(
         model=probe,
         num_classes=num_classes,
-        lr=cfg.eval.segmentation.lr,
+        lr=eval_cfg.segmentation.lr,
         device=str(device),
     )
 
     solver.fit(
         train_loader=train_loader,
         val_loader=val_loader,
-        epochs=cfg.eval.segmentation.epochs,
+        epochs=eval_cfg.segmentation.epochs,
         verbose=cfg.verbose,
     )
 
@@ -333,8 +345,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
 
-        # seg_method = f"seg-{cfg.eval.segmentation.head_type}"
-        # seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
+        seg_method = f"seg-{cfg.eval.segmentation.head_type}"
+        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
         result = get_datasets(
             dataset_name=ds_name,
@@ -411,8 +423,9 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             all_rows.append(
                 EvaluationResult(
                     **common_meta,
-                    method=seg_method,
-                    accuracy=miou,
+                    method=cfg.eval.segmentation.head_type,
+                    metric_name="mIoU",
+                    metric_value=miou,
                     ci_lower=0.0,
                     ci_upper=0.0,
                     feature_dim=feat_dim,
@@ -450,7 +463,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     EvaluationResult(
                         **common_meta,
                         method="knn5",
-                        accuracy=knn_acc,
+                        metric_name="accuracy",
+                        metric_value=knn_acc,
                         ci_lower=knn_lo,
                         ci_upper=knn_hi,
                         feature_dim=feature_dim,
@@ -480,7 +494,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     EvaluationResult(
                         **common_meta,
                         method="linear",
-                        accuracy=lin_acc,
+                        metric_name="accuracy",
+                        metric_value=lin_acc,
                         ci_lower=lin_lo,
                         ci_upper=lin_hi,
                         feature_dim=feature_dim,

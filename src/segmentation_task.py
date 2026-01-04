@@ -1,3 +1,5 @@
+"""Segmentation Training Task Logic."""
+
 from .segmentation_probe import SegmentationProbe
 import torch
 import logging
@@ -6,6 +8,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from typing import Optional
 from tqdm import tqdm
+from torchmetrics.classification import MulticlassJaccardIndex
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +38,18 @@ class SegmentationSolver:
         self.model = model.to(device)
         self.num_classes = num_classes
         self.device = device
+        # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
-            self.model.head.parameters(), lr=lr, weight_decay=weight_decay
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=lr,
+            weight_decay=weight_decay,
         )
+
         self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
+
+        self.metric = MulticlassJaccardIndex(
+            num_classes=self.num_classes,
+        )
 
     def fit(
         self,
@@ -83,32 +94,26 @@ class SegmentationSolver:
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> float:
         self.model.eval()
-        conf_mat = torch.zeros((self.num_classes, self.num_classes), device=self.device)
+        self.metric.reset()
+
+        self.metric.to(self.device)
 
         for batch in dataloader:
             if isinstance(batch, dict):
                 images = batch["image"].to(self.device)
-                masks = batch["mask"].to(self.device).long()
+                masks = batch["mask"].to(self.device)
             else:
-                images, masks = batch[0].to(self.device), batch[1].to(self.device).long()
+                images, masks = batch[0].to(self.device), batch[1].to(self.device)
 
+            # Ensure masks are (B, H, W)
             if masks.ndim == 4:
                 masks = masks.squeeze(1)
+            masks = masks.long()
 
             logits = self.model(images)
-            preds = logits.argmax(dim=1)
 
-            mask_vector = masks.flatten()
-            pred_vector = preds.flatten()
-            valid = (mask_vector >= 0) & (mask_vector < self.num_classes)
+            self.metric.update(logits, masks)
 
-            idx = mask_vector[valid] * self.num_classes + pred_vector[valid]
-            conf_mat += torch.bincount(idx, minlength=self.num_classes**2).reshape(
-                self.num_classes, self.num_classes
-            )
-
-        intersection = torch.diag(conf_mat)
-        union = conf_mat.sum(0) + conf_mat.sum(1) - intersection
-        iou = intersection / (union + 1e-6)
-        miou = iou.mean().item()
+        # Compute final score
+        miou = self.metric.compute().item()
         return miou
