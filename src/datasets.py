@@ -29,6 +29,21 @@ NUM_CLASSES_PER_DATASET = {
     "m-brick-kiln": 2,
     "m-so2sat": 17,
     # "m-bigearthnet": None,  # TODO: Handle BigEarthNet separately
+    "benv2": 19,
+    "treesatai": 13,
+    "so2sat": 17,
+    "forestnet": 12,
+    "caffe": 4,
+    "cloudsen12": 4,
+    "burn_scars": 2,
+    "dynamic_earthnet": 7,
+    "flair2": 13,
+    "fotw": 2,
+    "kuro_siwo": 4,
+    "pastis": 19,
+    "spacenet2": 3,
+    "spacenet7": 3,
+
 }
 
 PARTITION_NAMES = [
@@ -97,6 +112,10 @@ def _get_v2_class_name(dataset_name: str) -> str:
         return "GeoBenchSo2Sat"
     if dataset_name == "flair2":
         return "GeoBenchFLAIR2"
+    if dataset_name == "spacenet2":
+        return "GeoBenchSpaceNet2"
+    if dataset_name == "spacenet7":
+        return "GeoBenchSpaceNet7"
 
     camel_name = "".join(x.title() for x in dataset_name.split("_"))
     return f"GeoBench{camel_name}"
@@ -289,7 +308,7 @@ def get_datasets(
                 sample["image"] = img.squeeze(0)
             if "mask" in sample:
                 # assuming mask is single-channel with class indices
-                mask: torch.Tensor = sample["mask"]
+                mask: torch.Tensor = sample["mask"].float()
                 h_m, w_m = mask.shape[-2], mask.shape[-1]
                 if h_m != image_size or w_m != image_size:
                     mask = mask.unsqueeze(0).unsqueeze(0)
@@ -298,7 +317,7 @@ def get_datasets(
                         size=(image_size, image_size),
                         mode="nearest",
                     )
-                    sample["mask"] = mask.squeeze(0).squeeze(0)
+                    sample["mask"] = mask.squeeze(0).squeeze(0).long()
             return sample
 
         resize_transform = _resize

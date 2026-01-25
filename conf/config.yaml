@@ -28,6 +28,12 @@ eval:
   merge_val: true          # merge train+val for final logistic training
   skip_linear: false       # if true, skip LogisticRegression evaluation
 
+  segmentation:
+    head_type: "linear"
+    layers: []
+    lr: 1e-3
+    epochs: 1
+
 hydra:
   run:
     dir: .

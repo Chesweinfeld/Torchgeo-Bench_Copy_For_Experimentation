@@ -6,6 +6,8 @@ import logging
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from torch.utils.data import DataLoader
+
 
 import hydra
 import numpy as np
@@ -21,6 +23,8 @@ from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
 from src.linear import LogisticRegression
 from src.models.interface import BenchModel
 from src.utils import extract_features
+from src.segmentation_probe import SegmentationProbe
+from src.segmentation_task import SegmentationSolver
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +66,9 @@ def bootstrap_accuracy(
 @dataclass
 class EvaluationResult:
     dataset: str
-    method: str  # 'knn5' or 'linear'
-    accuracy: float
+    method: str  # 'knn5' or 'linear' seg_linear, seg_conv
+    metric_name: str  # 'accuracy' or 'mIoU'
+    metric_value: float
     ci_lower: float
     ci_upper: float
     feature_dim: int
@@ -208,6 +213,56 @@ def evaluate_logistic(
     return acc, lo, hi, float(best_c)
 
 
+def evaluate_segmentation(
+    model: torch.nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    test_loader: DataLoader,
+    cfg: DictConfig,
+    num_classes: int,
+    device: torch.device,
+) -> tuple[float, int]:
+    """Evaluate segmentation performance using a segmentation probe and solver."""
+
+    # merge with model specific eval config if present
+    eval_cfg = cfg.eval
+    if "eval" in cfg.model and cfg.model.eval is not None:
+        eval_cfg = OmegaConf.merge(eval_cfg, cfg.model.eval)
+    if "segmentation" not in eval_cfg:
+        raise ValueError("Segmentation evaluation config missing for the model.")
+
+    if "segmentation" not in cfg.eval:
+        raise ValueError("Segmentation evaluation config missing for the model.")
+    
+    probe = SegmentationProbe(
+        backbone=model,
+        layer_names=eval_cfg.segmentation.layers,
+        num_classes=num_classes,
+        in_channels=cfg.model.num_channels,
+        head_type=eval_cfg.segmentation.head_type,
+        freeze_backbone=True,
+    )
+
+    solver = SegmentationSolver(
+        model=probe,
+        num_classes=num_classes,
+        lr=eval_cfg.segmentation.lr,
+        device=str(device),
+    )
+
+    solver.fit(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        epochs=eval_cfg.segmentation.epochs,
+        verbose=cfg.verbose,
+    )
+
+    miou = solver.evaluate(test_loader)
+    feature_dim = probe._dry_run_channels()  # Dynamically get concat dim
+
+    return miou, feature_dim
+
+
 # (logging already imported above)
 
 # ---------------------------------------------------------------------------
@@ -227,12 +282,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
     output_path = cfg.output
 
     def _append_rows_atomic(path: str, rows: list[dict]) -> None:
-        """Append rows to CSV atomically with advisory file lock.
-
-        Ensures that if multiple processes start roughly simultaneously, they
-        won't overwrite each other's output. Creates file if absent, writes header
-        only if file was empty prior to append.
-        """
+        """Append rows to CSV atomically with advisory file lock."""
         if not rows:
             return
         df_local = pd.DataFrame(rows)
@@ -290,16 +340,13 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             getattr(cfg.dataset, "interpolation", "bicubic"),
             cfg.dataset.partition,
         )
+
+        # Check resume for standard methods
         knn_key = (ds_name, "knn5", cfg.model._target_, cfg.model.name, *config_tuple)
         linear_key = (ds_name, "linear", cfg.model._target_, cfg.model.name, *config_tuple)
-        skip_knn = cfg.resume and knn_key in completed_runs
-        skip_linear = cfg.resume and linear_key in completed_runs
-        skip_linear = skip_linear or getattr(cfg.eval, "skip_linear", False)
 
-        if skip_knn and skip_linear:
-            if cfg.verbose:
-                print(f"[{ds_name}] Skipping entirely (all methods already computed)")
-            continue
+        seg_method = f"seg-{cfg.eval.segmentation.head_type}"
+        seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
         result = get_datasets(
             dataset_name=ds_name,
@@ -315,12 +362,19 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
-        # Determine channels & instantiate (per dataset re-init). We avoid inserting
-        # raw dataset objects into the OmegaConf tree (unsupported). Instead we
-        # conditionally supply the dataset only for empirical RCF models.
-        # Access first sample to infer channel count (dataset returns mapping-like Sample)
-        first_sample = train_dataset[0]  # type: ignore[index]
-        num_channels = first_sample["image"].shape[0]  # type: ignore[index]
+        # check if we have classification or segmentation
+        first_sample = train_dataset[0]
+        num_channels = first_sample["image"].shape[0]
+        is_segmentation = "mask" in first_sample
+        num_classes = NUM_CLASSES_PER_DATASET.get(ds_name, 0)
+
+        # Resume check for segmentation
+        if is_segmentation and cfg.resume and seg_key in completed_runs:
+            if cfg.verbose:
+                print(f"[{ds_name}] Skipping segmentation (already computed)")
+            continue
+
+        # Instantiate Backbone
         model_cfg = OmegaConf.merge(cfg.model, {"num_channels": num_channels})
 
         needs_dataset = (
@@ -332,8 +386,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             target_path: str = cfg.model._target_
             module_name, class_name = target_path.rsplit(".", 1)
             module = __import__(module_name, fromlist=[class_name])
-            ModelClass = getattr(module, class_name)
-            model: BenchModel = ModelClass(
+            model = getattr(module, class_name)(
                 num_channels=num_channels,
                 features=cfg.model.features,
                 kernel_size=cfg.model.kernel_size,
@@ -343,97 +396,115 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                 dataset=train_dataset,
             )
         else:
-            model: BenchModel = instantiate(model_cfg)  # type: ignore
-        model.to(device)
-        model.eval()
+            model: BenchModel = instantiate(model_cfg)
+        model.to(device).eval()
 
-        if cfg.verbose:
-            print(f"[{ds_name}] Embedding train set ({len(train_loader)} batches)...")
-        x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
-        if cfg.verbose:
-            print(f"[{ds_name}] Embedding val set ({len(val_loader)} batches)...")
-        x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
-        if cfg.verbose:
-            print(f"[{ds_name}] Embedding test set ({len(test_loader)} batches)...")
-        x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
-        feature_dim = x_train.shape[1]
+        # Shared Result metadata
+        common_meta = {
+            "dataset": ds_name,
+            "seed": cfg.seed,
+            "model": cfg.model._target_,
+            "name": cfg.model.name,
+            "normalization": cfg.dataset.normalization,
+            "image_size": getattr(cfg.dataset, "image_size", None),
+            "interpolation": getattr(cfg.dataset, "interpolation", "bicubic"),
+            "partition": cfg.dataset.partition,
+            "c_range_start": c_start,
+            "c_range_stop": c_stop,
+            "c_range_num": c_num,
+            "merge_val": cfg.eval.merge_val,
+            "bootstrap": cfg.eval.bootstrap,
+        }
 
-        if not skip_knn:
-            knn_acc, knn_lo, knn_hi = evaluate_knn(
-                x_train, y_train, x_test, y_test, cfg.seed, cfg.eval.bootstrap, verbose=cfg.verbose
+        if is_segmentation:
+            miou, feat_dim = evaluate_segmentation(
+                model, train_loader, val_loader, test_loader, cfg, num_classes, device
             )
             all_rows.append(
                 EvaluationResult(
-                    dataset=ds_name,
-                    method="knn5",
-                    accuracy=knn_acc,
-                    ci_lower=knn_lo,
-                    ci_upper=knn_hi,
-                    feature_dim=feature_dim,
+                    **common_meta,
+                    method=cfg.eval.segmentation.head_type,
+                    metric_name="mIoU",
+                    metric_value=miou,
+                    ci_lower=0.0,
+                    ci_upper=0.0,
+                    feature_dim=feat_dim,
                     best_c=None,
-                    n_train=len(x_train),
-                    n_val=len(x_val),
-                    n_test=len(x_test),
-                    seed=cfg.seed,
-                    model=cfg.model._target_,
-                    name=cfg.model.name,
-                    normalization=cfg.dataset.normalization,
-                    image_size=getattr(cfg.dataset, "image_size", None),
-                    interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-                    partition=cfg.dataset.partition,
-                    c_range_start=c_start,
-                    c_range_stop=c_stop,
-                    c_range_num=c_num,
-                    merge_val=cfg.eval.merge_val,
-                    bootstrap=cfg.eval.bootstrap,
+                    n_train=len(train_dataset),
+                    n_val=len(val_loader.dataset),
+                    n_test=len(test_loader.dataset),
                 ).to_row()
+            )
+        else:
+            skip_knn = cfg.resume and knn_key in completed_runs
+            skip_linear = (cfg.resume and linear_key in completed_runs) or getattr(
+                cfg.eval, "skip_linear", False
             )
 
-        if not skip_linear:
-            if cfg.verbose:
-                print(
-                    f"[{ds_name}] Running LogisticRegression sweep over {len(c_values_list)} C values..."
+            if skip_knn and skip_linear:
+                continue
+
+            x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
+            x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
+            x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
+            feature_dim = x_train.shape[1]
+
+            if not skip_knn:
+                knn_acc, knn_lo, knn_hi = evaluate_knn(
+                    x_train,
+                    y_train,
+                    x_test,
+                    y_test,
+                    cfg.seed,
+                    cfg.eval.bootstrap,
+                    verbose=cfg.verbose,
                 )
-            lin_acc, lin_lo, lin_hi, best_c = evaluate_logistic(
-                x_train,
-                y_train,
-                x_val,
-                y_val,
-                x_test,
-                y_test,
-                c_values=c_values_list,
-                seed=cfg.seed,
-                n_bootstrap=cfg.eval.bootstrap,
-                merge_val=cfg.eval.merge_val,
-                device=cfg.device,
-                verbose=cfg.verbose,
-            )
-            all_rows.append(
-                EvaluationResult(
-                    dataset=ds_name,
-                    method="linear",
-                    accuracy=lin_acc,
-                    ci_lower=lin_lo,
-                    ci_upper=lin_hi,
-                    feature_dim=feature_dim,
-                    best_c=best_c,
-                    n_train=len(x_train),
-                    n_val=len(x_val),
-                    n_test=len(x_test),
-                    seed=cfg.seed,
-                    model=cfg.model._target_,
-                    name=cfg.model.name,
-                    normalization=cfg.dataset.normalization,
-                    image_size=getattr(cfg.dataset, "image_size", None),
-                    interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-                    partition=cfg.dataset.partition,
-                    c_range_start=c_start,
-                    c_range_stop=c_stop,
-                    c_range_num=c_num,
-                    merge_val=cfg.eval.merge_val,
-                    bootstrap=cfg.eval.bootstrap,
-                ).to_row()
-            )
+                all_rows.append(
+                    EvaluationResult(
+                        **common_meta,
+                        method="knn5",
+                        metric_name="accuracy",
+                        metric_value=knn_acc,
+                        ci_lower=knn_lo,
+                        ci_upper=knn_hi,
+                        feature_dim=feature_dim,
+                        best_c=None,
+                        n_train=len(x_train),
+                        n_val=len(x_val),
+                        n_test=len(x_test),
+                    ).to_row()
+                )
+
+            if not skip_linear:
+                lin_acc, lin_lo, lin_hi, best_c = evaluate_logistic(
+                    x_train,
+                    y_train,
+                    x_val,
+                    y_val,
+                    x_test,
+                    y_test,
+                    c_values_list,
+                    cfg.seed,
+                    cfg.eval.bootstrap,
+                    cfg.eval.merge_val,
+                    cfg.device,
+                    cfg.verbose,
+                )
+                all_rows.append(
+                    EvaluationResult(
+                        **common_meta,
+                        method="linear",
+                        metric_name="accuracy",
+                        metric_value=lin_acc,
+                        ci_lower=lin_lo,
+                        ci_upper=lin_hi,
+                        feature_dim=feature_dim,
+                        best_c=best_c,
+                        n_train=len(x_train),
+                        n_val=len(x_val),
+                        n_test=len(x_test),
+                    ).to_row()
+                )
 
         _append_rows_atomic(output_path, all_rows)
         all_rows.clear()
