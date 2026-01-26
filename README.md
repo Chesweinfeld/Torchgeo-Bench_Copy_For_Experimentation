@@ -43,10 +43,12 @@ python torchgeo_bench_download.py --version v2 --datasets forestnet
 `torchgeo-bench` provides:
 
 1. **Simple Model Interface**: Define your model by implementing `forward_features(images, bboxes)` → embeddings
-2. **Automated Evaluation**: KNN-5 and Linear Probing with bootstrapped confidence intervals
-3. **GeoBench Integration**: Direct access to classification benchmark datasets
-4. **Hydra Configuration**: Flexible experiment configuration without code changes
-5. **Efficient Workflows**: Per-dataset model reinitialization handles varying input channels
+2. **Automated Evaluation**: KNN-5, Linear Probing, and Segmentation (mIoU) with bootstrapped confidence intervals
+3. **GeoBench V1 & V2 Integration**: Direct access to classification and segmentation benchmark datasets
+4. **Resume Mode**: Skip already-computed experiments when interrupted/restarted
+5. **Hydra Configuration**: Flexible experiment configuration without code changes
+6. **Efficient Workflows**: Per-dataset model reinitialization handles varying input channels
+7. **Atomic CSV Writes**: Results appended with file locking for parallel job safety
 
 ## Quick Start
 
@@ -82,6 +84,15 @@ torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
 
 # Use smaller training partition
 torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
+
+# Resume a previously interrupted run (skips completed experiments)
+torchgeo-bench run resume=true
+
+# Evaluate segmentation datasets
+torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+
+# Select specific GPU device
+torchgeo-bench run device=cuda:1
 ```
 
 Alternatively, you can still use the standalone script with Hydra directly:
@@ -185,15 +196,36 @@ See `src/bench_models.py` for examples. You can wrap any existing model (timm, t
 
 ## Datasets
 
-### Supported GeoBench Datasets
+### Supported GeoBench V1 Datasets (Classification)
 
-| Dataset         | Classes | Task                          | Samples (default) |
-|-----------------|---------|-------------------------------|-------------------|
-| `m-eurosat`     | 10      | Land cover classification     | ~27,000           |
-| `m-forestnet`   | 12      | Forest type classification    | ~500,000          |
-| `m-so2sat`      | 17      | Local climate zones           | ~400,000          |
-| `m-pv4ger`      | 2       | Photovoltaic detection        | ~100,000          |
-| `m-brick-kiln`  | 2       | Brick kiln detection          | ~100,000          |
+| Dataset         | Classes | Task                          | Prefix |
+|-----------------|---------|-------------------------------|--------|
+| `m-eurosat`     | 10      | Land cover classification     | `m-`   |
+| `m-forestnet`   | 12      | Forest type classification    | `m-`   |
+| `m-so2sat`      | 17      | Local climate zones           | `m-`   |
+| `m-pv4ger`      | 2       | Photovoltaic detection        | `m-`   |
+| `m-brick-kiln`  | 2       | Brick kiln detection          | `m-`   |
+
+### Supported GeoBench V2 Datasets
+
+| Dataset           | Classes | Task            |
+|-------------------|---------|-----------------|
+| `benv2`           | 19      | Classification  |
+| `treesatai`       | 13      | Classification  |
+| `so2sat`          | 17      | Classification  |
+| `forestnet`       | 12      | Classification  |
+| `caffe`           | 4       | Segmentation    |
+| `cloudsen12`      | 4       | Segmentation    |
+| `burn_scars`      | 3       | Segmentation    |
+| `dynamic_earthnet`| 7       | Segmentation    |
+| `flair2`          | 13      | Segmentation    |
+| `fotw`            | 4       | Segmentation    |
+| `kuro_siwo`       | 4       | Segmentation    |
+| `pastis`          | 20      | Segmentation    |
+| `spacenet2`       | 3       | Segmentation    |
+| `spacenet7`       | 3       | Segmentation    |
+
+**Note:** V1 datasets use the `m-` prefix (e.g., `m-eurosat`), while V2 datasets use no prefix (e.g., `forestnet`). The `eurosat` dataset in V2 maps to `benv2`.
 
 ### Data Partitions
 
@@ -226,18 +258,29 @@ seed: 0
 device: cuda:0
 output: torchgeo_bench_results.csv
 verbose: false
+resume: false             # Skip completed experiments on restart
 
 dataset:
-  names: all  # or [m-eurosat, m-forestnet]
+  names: all              # or [m-eurosat, m-forestnet, burn_scars]
   partition: default
   batch_size: 64
   normalization: mean_stdev  # or min_max, percentile_2_98, none
+  image_size: 224            # null to preserve native size
+  interpolation: bilinear    # bilinear, bicubic, or nearest
+  geobench_root: data/classification_v1.0    # V1 dataset location
+  geobench_v2_root: data/geobenchv2          # V2 dataset location
 
 eval:
-  bootstrap: 500        # CI bootstrap samples
-  c_range: [-7, 2, 20]  # LogisticRegression C sweep (log10 scale)
-  merge_val: true       # Merge train+val for final linear model
-  skip_linear: false    # Skip linear probing (KNN only)
+  bootstrap: 500          # CI bootstrap samples
+  c_range: [-7, 2, 20]    # LogisticRegression C sweep (log10 scale)
+  merge_val: true         # Merge train+val for final linear model
+  skip_linear: false      # Skip linear probing (KNN only)
+
+  segmentation:
+    head_type: linear     # Segmentation probe head type
+    layers: []            # Additional MLP layers (empty = linear)
+    lr: 0.001             # Learning rate for segmentation training
+    epochs: 1             # Training epochs for segmentation probe
 ```
 
 ### Override Any Config
@@ -251,11 +294,22 @@ torchgeo-bench run eval.bootstrap=1000
 
 # Custom output file
 torchgeo-bench run output=my_results.csv
+
+# Resume after interruption (skips already-computed results)
+torchgeo-bench run resume=true
+
+# Custom data paths
+torchgeo-bench run dataset.geobench_root=/path/to/v1 dataset.geobench_v2_root=/path/to/v2
+
+# Configure segmentation evaluation
+torchgeo-bench run eval.segmentation.epochs=5 eval.segmentation.lr=0.0001
 ```
 
 ## Evaluation Protocol
 
-For each dataset:
+### Classification Datasets
+
+For each classification dataset:
 
 1. **Model Initialization**: Instantiate model with dataset's `num_channels`
 2. **Feature Extraction**: 
@@ -273,13 +327,37 @@ For each dataset:
    - Bootstrap predictions 500× for 95% CI
 5. **Results**: Append two rows (knn5, linear) to CSV
 
+### Segmentation Datasets
+
+For each segmentation dataset:
+
+1. **Model Initialization**: Instantiate model with dataset's `num_channels`
+2. **Feature Extraction**: Extract dense feature maps from model
+3. **Segmentation Probe Training**:
+   - Train a linear or MLP head on training features
+   - Uses CrossEntropyLoss with `ignore_index=255` for unlabeled pixels
+4. **mIoU Evaluation**:
+   - Evaluate on test set using MulticlassJaccardIndex (mIoU)
+   - Excludes ignore class from metric computation
+5. **Results**: Append one row (seg-linear) to CSV
+
 ### Output Format
 
 ```csv
-dataset,method,accuracy,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model
-m-eurosat,knn5,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFBench
-m-eurosat,linear,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench
+dataset,method,metric_name,metric_value,ci_lower,ci_upper,feature_dim,best_c,n_train,n_val,n_test,seed,model,name,normalization,image_size,interpolation,partition
+m-eurosat,knn5,accuracy,0.8234,0.8123,0.8345,512,,21600,5400,5400,0,src.bench_models.RCFBench,rcf,mean_stdev,224,bilinear,default
+m-eurosat,linear,accuracy,0.8567,0.8461,0.8673,512,0.1,21600,5400,5400,0,src.bench_models.RCFBench,rcf,mean_stdev,224,bilinear,default
+burn_scars,seg-linear,mIoU,0.6234,0.0,0.0,768,,1000,200,300,0,src.bench_models.ResNet50Bench,resnet50,mean_stdev,224,bilinear,default
 ```
+
+### Resume Mode
+
+The `resume=true` option enables safe resumption of interrupted runs:
+
+- Reads existing output CSV to find completed experiments
+- Skips (dataset, method, model, config) combinations already present
+- Useful for long benchmark sweeps or recovering from crashes
+- Works with atomic file appending for multi-process safety
 
 ## Development
 
@@ -302,9 +380,13 @@ pytest tests/test_geobench_dataset.py -k "m-eurosat" -v
 torchgeo-bench run dataset.names=[m-eurosat] eval.bootstrap=10 output=test.csv
 ```
 
-**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, set the environment variable `GEOBENCH_ROOT` to the full path of your dataset root before running tests:
+**Note:** The test suite expects the GeoBench dataset to be available in the default directory `data/`. If your data is located elsewhere, configure the paths in `conf/config.yaml` or use command-line overrides:
 
 ```bash
+# Command-line override
+torchgeo-bench run dataset.geobench_root=/your/path/to/classification_v1.0
+
+# Or set environment variable (for tests)
 export GEOBENCH_ROOT=/your/path/to/classification_v1.0
 pytest
 ```
@@ -396,7 +478,7 @@ Adjust number of workers:
 ## Roadmap
 
 - [ ] Embedding disk caching
-- [ ] Segmentation benchmark support
+- [x] Segmentation benchmark support
 - [ ] Multi-label classification metrics
 - [ ] Distributed evaluation (multi-GPU)
 - [ ] Automated hyperparameter sweeps

@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
 
+    # Common ignore index values used in segmentation datasets
+    IGNORE_INDEX = 255
+
     def __init__(
         self,
         model: SegmentationProbe,
@@ -26,6 +29,7 @@ class SegmentationSolver:
         weight_decay: float = 0.0,
         device: str = "cuda",
         criterion: Optional[nn.Module] = None,
+        ignore_index: int = 255,
     ) -> None:
         """Initialize the SegmentationSolver.
 
@@ -36,10 +40,12 @@ class SegmentationSolver:
             weight_decay: Weight decay for the optimizer.
             device: Device to run training on ('cuda' or 'cpu').
             criterion: Loss function to use. If None, defaults to CrossEntropyLoss.
+            ignore_index: Label value to ignore in loss and metrics (default: 255).
         """
         self.model = model.to(device)
         self.num_classes = num_classes
         self.device = device
+        self.ignore_index = ignore_index
         # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
@@ -47,10 +53,13 @@ class SegmentationSolver:
             weight_decay=weight_decay,
         )
 
-        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
+        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss(
+            ignore_index=self.ignore_index
+        )
 
         self.metric = MulticlassJaccardIndex(
             num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
         )
 
     def fit(

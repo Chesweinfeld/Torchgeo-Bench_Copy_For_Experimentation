@@ -35,12 +35,12 @@ NUM_CLASSES_PER_DATASET = {
     "forestnet": 12,
     "caffe": 4,
     "cloudsen12": 4,
-    "burn_scars": 2,
+    "burn_scars": 3,  # 0=background, 1=burn, 2=cloud
     "dynamic_earthnet": 7,
     "flair2": 13,
-    "fotw": 2,
+    "fotw": 4,  # 0=background, 1=field, 2=boundary, 3=other
     "kuro_siwo": 4,
-    "pastis": 19,
+    "pastis": 20,  # 0-18 crops + background
     "spacenet2": 3,
     "spacenet7": 3,
 }
@@ -57,7 +57,7 @@ PARTITION_NAMES = [
 ]
 
 DEFAULT_GEOBENCH_ROOT = "data/classification_v1.0"
-DEFAULT_GEOBENCH_V2_ROOT = "/mnt/SSD2/nils/datasets/GEO-Bench-2/"
+DEFAULT_GEOBENCH_V2_ROOT = "data/geobenchv2"
 
 # V2 Dataset Registry
 V2_DATASETS = {

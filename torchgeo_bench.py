@@ -356,6 +356,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             return_val=True,
             image_size=getattr(cfg.dataset, "image_size", None),
             interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+            geobench_root=getattr(cfg.dataset, "geobench_root", None),
+            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
         )
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             print(f"Skipping dataset {ds_name} (unexpected return)")
