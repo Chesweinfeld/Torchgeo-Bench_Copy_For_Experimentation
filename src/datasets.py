@@ -6,11 +6,11 @@ the V1 GeoBenchDataset class and the V2 geobench_v2 package.
 
 import os
 import warnings
+from typing import Callable, Optional, Tuple, Union
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from typing import Optional, Callable, Tuple, Union
-
 
 from .geobench_dataset import GeoBenchDataset
 
@@ -35,15 +35,14 @@ NUM_CLASSES_PER_DATASET = {
     "forestnet": 12,
     "caffe": 4,
     "cloudsen12": 4,
-    "burn_scars": 2,
+    "burn_scars": 3,  # 0=background, 1=burn, 2=cloud
     "dynamic_earthnet": 7,
     "flair2": 13,
-    "fotw": 2,
+    "fotw": 4,  # 0=background, 1=field, 2=boundary, 3=other
     "kuro_siwo": 4,
-    "pastis": 19,
+    "pastis": 20,  # 0-18 crops + background
     "spacenet2": 3,
     "spacenet7": 3,
-
 }
 
 PARTITION_NAMES = [
@@ -58,7 +57,7 @@ PARTITION_NAMES = [
 ]
 
 DEFAULT_GEOBENCH_ROOT = "data/classification_v1.0"
-DEFAULT_GEOBENCH_V2_ROOT = "/mnt/SSD2/nils/datasets/GEO-Bench-2/"
+DEFAULT_GEOBENCH_V2_ROOT = "data/geobenchv2"
 
 # V2 Dataset Registry
 V2_DATASETS = {
@@ -120,6 +119,7 @@ def _get_v2_class_name(dataset_name: str) -> str:
     camel_name = "".join(x.title() for x in dataset_name.split("_"))
     return f"GeoBench{camel_name}"
 
+
 def _get_datasets_v2(
     dataset_name: str,
     partition_name: str,
@@ -128,7 +128,7 @@ def _get_datasets_v2(
     only_return_datasets: bool,
     root: str,
     num_workers: int,
-    bands: tuple,
+    bands: tuple[str, ...] | None,
     transform: Optional[Callable],
     normalization: str,
 ):
@@ -197,7 +197,7 @@ def _get_datasets_v1(
     only_return_datasets: bool,
     root: str,
     num_workers: int,
-    bands: tuple,
+    bands: tuple[str, ...] | None,
     transform: Optional[Callable],
     normalize_arg: Union[bool, str],
 ):
@@ -270,8 +270,16 @@ def get_datasets(
     num_workers: int = 8,
     image_size: int | None = None,
     interpolation: str = "bicubic",
+    bands: str | tuple[str, ...] | None = "rgb",
 ):
-    """Load GeoBench dataset splits and dataloaders (supports V1 and V2)."""
+    """Load GeoBench dataset splits and dataloaders (supports V1 and V2).
+
+    Args:
+        bands: Band selection. Options:
+            - "rgb" (default): Load red, green, blue bands only
+            - "all" or None: Load all available bands (multispectral)
+            - tuple of band names: e.g., ("red", "green", "blue", "nir")
+    """
 
     if geobench_root is None:
         geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
@@ -322,7 +330,20 @@ def get_datasets(
 
         resize_transform = _resize
 
-    bands = ("red", "green", "blue")
+    # Resolve bands parameter
+    # Convert OmegaConf ListConfig or other iterables to tuple
+    if bands == "rgb":
+        bands_tuple: tuple[str, ...] | None = ("red", "green", "blue")
+    elif bands == "all" or bands is None:
+        bands_tuple = None  # None means load all available bands
+    elif isinstance(bands, str):
+        raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+    else:
+        # Handle list, tuple, or OmegaConf ListConfig
+        try:
+            bands_tuple = tuple(bands)  # type: ignore[arg-type]
+        except TypeError:
+            raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(
@@ -333,7 +354,7 @@ def get_datasets(
             only_return_datasets=only_return_datasets,
             root=geobench_v2_root,
             num_workers=num_workers,
-            bands=bands,
+            bands=bands_tuple,
             transform=resize_transform,
             normalization=normalization,
         )
@@ -346,7 +367,7 @@ def get_datasets(
             only_return_datasets=only_return_datasets,
             root=geobench_root,
             num_workers=num_workers,
-            bands=bands,
+            bands=bands_tuple,
             transform=resize_transform,
             normalize_arg=normalize_v1,  # V1 uses mapped bool/string
         )

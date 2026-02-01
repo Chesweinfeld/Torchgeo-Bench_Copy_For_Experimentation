@@ -1,20 +1,25 @@
 """Segmentation Training Task Logic."""
 
-from .segmentation_probe import SegmentationProbe
-import torch
 import logging
+from typing import Optional
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from typing import Optional
-from tqdm import tqdm
 from torchmetrics.classification import MulticlassJaccardIndex
+from tqdm import tqdm
+
+from .segmentation_probe import SegmentationProbe
 
 logger = logging.getLogger(__name__)
 
 
 class SegmentationSolver:
     """A lightweight trainer for the SegmentationProbe."""
+
+    # Common ignore index values used in segmentation datasets
+    IGNORE_INDEX = 255
 
     def __init__(
         self,
@@ -24,6 +29,7 @@ class SegmentationSolver:
         weight_decay: float = 0.0,
         device: str = "cuda",
         criterion: Optional[nn.Module] = None,
+        ignore_index: int = 255,
     ) -> None:
         """Initialize the SegmentationSolver.
 
@@ -34,10 +40,12 @@ class SegmentationSolver:
             weight_decay: Weight decay for the optimizer.
             device: Device to run training on ('cuda' or 'cpu').
             criterion: Loss function to use. If None, defaults to CrossEntropyLoss.
+            ignore_index: Label value to ignore in loss and metrics (default: 255).
         """
         self.model = model.to(device)
         self.num_classes = num_classes
         self.device = device
+        self.ignore_index = ignore_index
         # parameters can either be heads for linear probe or projectors + head for conv_block probe
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
@@ -45,10 +53,13 @@ class SegmentationSolver:
             weight_decay=weight_decay,
         )
 
-        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
+        self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss(
+            ignore_index=self.ignore_index
+        )
 
         self.metric = MulticlassJaccardIndex(
             num_classes=self.num_classes,
+            ignore_index=self.ignore_index,
         )
 
     def fit(
@@ -66,7 +77,7 @@ class SegmentationSolver:
             total_loss = 0.0
             num_batches = 0
 
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", disable=not verbose)
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", disable=not verbose)
             for batch in pbar:
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
@@ -89,7 +100,7 @@ class SegmentationSolver:
 
             if val_loader and verbose:
                 miou = self.evaluate(val_loader)
-                logger.info(f"Epoch {epoch+1} Val mIoU: {miou:.4f}")
+                logger.info(f"Epoch {epoch + 1} Val mIoU: {miou:.4f}")
 
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> float:

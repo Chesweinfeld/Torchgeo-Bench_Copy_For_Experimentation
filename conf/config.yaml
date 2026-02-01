@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 seed: 0
-device: cuda:0
+device: cuda:5
 output: torchgeo_bench_results.csv
 verbose: false
 resume: false  # if true, skip dataset+method combinations already in output CSV
@@ -18,8 +18,11 @@ dataset:
   partition: default
   batch_size: 64
   normalization: mean_stdev  # min_max | mean_stdev | percentile_2_98 | none
+  bands: rgb                  # rgb | all | list of band names (e.g., [red, green, blue, nir])
   image_size: 224           # e.g., 224; if null, no resizing
   interpolation: bilinear     # bilinear | bicubic | nearest; used if image_size set
+  geobench_root: data/classification_v1.0     # Root for GeoBench V1 datasets
+  geobench_v2_root: data/geobenchv2           # Root for GeoBench V2 datasets
 
 # Evaluation settings
 eval:
