@@ -9,3 +9,4 @@ pretrained: true
 global_pool: avg
 seed: null
 name: deit_base_patch16_224
+use_cls_token: false

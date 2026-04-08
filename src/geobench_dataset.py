@@ -296,7 +296,11 @@ class GeoBenchDataset(Dataset):
 
         # Convert to torch tensors
         image = torch.from_numpy(image)
-        label = torch.tensor(label, dtype=torch.long)
+        label_arr = np.asarray(label)
+        if label_arr.ndim > 0:
+            label = torch.from_numpy(label_arr.astype(np.float32))
+        else:
+            label = torch.tensor(label_arr.item(), dtype=torch.long)
 
         sample = {"image": image, "label": label, "sample_id": sample_id}
 
@@ -307,6 +311,12 @@ class GeoBenchDataset(Dataset):
 
     def get_num_classes(self) -> int:
         """Infer number of classes from all labels in the split."""
+        first_meta = self._load_sample_metadata(self.sample_ids[0])
+        label = first_meta["label"]
+        label_arr = np.asarray(label)
+        if label_arr.ndim > 0:
+            # Multi-label: number of classes = length of multi-hot vector
+            return label_arr.shape[0]
         labels = set()
         for sample_id in self.sample_ids:
             metadata = self._load_sample_metadata(sample_id)

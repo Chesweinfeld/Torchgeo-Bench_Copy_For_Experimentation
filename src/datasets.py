@@ -14,12 +14,7 @@ from torch.utils.data import DataLoader
 
 from .geobench_dataset import GeoBenchDataset
 
-try:
-    import geobench_v2.datasets as gb_v2
-
-    HAS_V2 = True
-except ImportError:
-    HAS_V2 = False
+import geobench_v2.datasets as gb_v2
 
 
 NUM_CLASSES_PER_DATASET = {
@@ -28,7 +23,7 @@ NUM_CLASSES_PER_DATASET = {
     "m-pv4ger": 2,
     "m-brick-kiln": 2,
     "m-so2sat": 17,
-    # "m-bigearthnet": None,  # TODO: Handle BigEarthNet separately
+    "m-bigearthnet": 43,
     "benv2": 19,
     "treesatai": 13,
     "so2sat": 17,
@@ -133,11 +128,6 @@ def _get_datasets_v2(
     normalization: str,
 ):
     """Handles loading logic for V2 datasets."""
-    if not HAS_V2:
-        raise ImportError(
-            f"Cannot load V2 dataset '{dataset_name}': geobench_v2 package not found."
-        )
-
     if partition_name != "default":
         warnings.warn(
             f"Partitions are not supported in GeoBench V2. Ignoring partition '{partition_name}'.",

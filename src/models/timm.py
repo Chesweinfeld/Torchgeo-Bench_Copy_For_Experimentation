@@ -34,7 +34,11 @@ class TimmPatchBenchModel(BenchModel):
     global_pool : Optional[str]
         Global pooling strategy for timm headless models.
         Common values: "avg" (default for CNNs), "token"/"avg" for ViTs.
-        If None, uses the model's default.
+        If None, uses the model's default. Overridden to "" when use_cls_token=True.
+    use_cls_token : bool
+        If True, use the CLS token representation instead of averaging spatial tokens.
+        Only applies to ViT/DeiT models that have a CLS token. Automatically disables
+        timm's internal pooling so raw tokens are returned.
     """
 
     def __init__(
@@ -47,6 +51,7 @@ class TimmPatchBenchModel(BenchModel):
         global_pool: Optional[str] = "avg",
         auto_resize: bool = False,
         target_size: Optional[int] = None,
+        use_cls_token: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
@@ -55,6 +60,11 @@ class TimmPatchBenchModel(BenchModel):
         self.pretrained = pretrained
         self.normalize = normalize
         self.auto_resize = auto_resize
+        self.use_cls_token = use_cls_token
+
+        # When using CLS token, disable timm's internal pooling so we get raw tokens
+        if self.use_cls_token and global_pool != "":
+            global_pool = ""
 
         # Create a headless backbone that returns pooled features from forward()
         # (timm convention with num_classes=0)
@@ -111,9 +121,12 @@ class TimmPatchBenchModel(BenchModel):
             # (B, C, h, w) -> (B, C)
             x = F.adaptive_avg_pool2d(x, 1).flatten(1)
         elif x.ndim == 3:
-            # (B, N, C) tokens -> drop cls if present and average tokens
-            # If N==1, this is already pooled.
-            if x.shape[1] > 1:
+            # (B, N, C) tokens
+            if self.use_cls_token and self._has_cls_token_like():
+                # Use the CLS token (first token)
+                x = x[:, 0, :]
+            elif x.shape[1] > 1:
+                # Average spatial tokens, optionally dropping CLS
                 x = x[:, 1:, :] if self._has_cls_token_like() else x
                 x = x.mean(dim=1)
             else:

@@ -11,14 +11,14 @@ import hydra
 import numpy as np
 import pandas as pd
 import torch
-from faissknn import FaissKNNClassifier
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from src.knn import KNNClassifier
 from src.linear import LogisticRegression
 from src.models.interface import BenchModel
 from src.segmentation_probe import SegmentationProbe
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
+MULTILABEL_DATASETS = {"m-bigearthnet"}
 
 
 def _expand_dataset_list(names):
@@ -61,6 +63,36 @@ def bootstrap_accuracy(
     upper = float(np.percentile(accs, hi))
     return acc_mean, lower, upper
 
+
+def bootstrap_map(
+    y_true: np.ndarray,
+    y_scores: np.ndarray,
+    n_boot: int = 1000,
+    ci: float = 95.0,
+    seed: int | None = None,
+) -> tuple[float, float, float]:
+    """Bootstrap micro-averaged mean Average Precision."""
+    rng = np.random.default_rng(seed)
+    n = len(y_true)
+    map_mean = float(average_precision_score(y_true, y_scores, average="micro"))
+    valid_maps: list[float] = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        yt = y_true[idx]
+        # Skip degenerate resamples with no positive labels
+        if yt.sum() == 0:
+            continue
+        valid_maps.append(
+            average_precision_score(yt, y_scores[idx], average="micro")
+        )
+    if not valid_maps:
+        return map_mean, map_mean, map_mean
+    maps = np.array(valid_maps, dtype=np.float32)
+    lo = (100 - ci) / 2
+    hi = 100 - lo
+    lower = float(np.percentile(maps, lo))
+    upper = float(np.percentile(maps, hi))
+    return map_mean, lower, upper
 
 @dataclass
 class EvaluationResult:
@@ -109,17 +141,31 @@ def evaluate_knn(
     device: str = "cpu",
     verbose: bool = False,
 ) -> tuple[float, float, float]:
-    if verbose:
-        logger.info(
-            f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap}, device={device})"
-        )
-    clf = FaissKNNClassifier(n_neighbors=5, device=device)
-    clf.fit(x_train.astype(np.float32), y_train.astype(np.int64))
-    preds = clf.predict(x_test.astype(np.float32))
-    acc_mean, lo, hi = bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
-    if verbose:
-        logger.info(f"[KNN] Test accuracy={acc_mean:.4f} (CI {lo:.4f}-{hi:.4f})")
-    return acc_mean, lo, hi
+    """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
+    multi_label = y_train.ndim == 2
+    clf = KNNClassifier(n_neighbors=5, device=device)
+    clf.fit(x_train, y_train)
+
+    if multi_label:
+        if verbose:
+            logger.info(
+                f"[KNN] Fit KNN5 multilabel (train={len(x_train)}, test={len(x_test)})"
+            )
+        y_scores = clf.predict_proba(x_test)
+        metric, lo, hi = bootstrap_map(y_test, y_scores, n_boot=n_bootstrap, seed=seed)
+        if verbose:
+            logger.info(f"[KNN] Test micro_mAP={metric:.4f} (CI {lo:.4f}-{hi:.4f})")
+    else:
+        if verbose:
+            logger.info(
+                f"[KNN] Fit KNN5 (train={len(x_train)}, test={len(x_test)}, boot={n_bootstrap})"
+            )
+        preds = clf.predict(x_test)
+        metric, lo, hi = bootstrap_accuracy(y_test, preds, n_boot=n_bootstrap, seed=seed)
+        if verbose:
+            logger.info(f"[KNN] Test accuracy={metric:.4f} (CI {lo:.4f}-{hi:.4f})")
+
+    return metric, lo, hi
 
 
 def evaluate_logistic(
@@ -136,29 +182,28 @@ def evaluate_logistic(
     device: str,
     verbose: bool = False,
 ) -> tuple[float, float, float, float]:
-    """Sweep C values using validation set, then retrain and evaluate.
-
-    Notes:
-        - Standardization was removed from the core LogisticRegression; we keep
-          embeddings raw here for consistency.
-        - Inputs are numpy arrays; they are converted to torch tensors once.
-        - Validation sweep trains separate lightweight models for each C.
-        - Final model is retrained (optionally on train+val) with higher max_iter.
-    """
+    """Sweep C values, retrain, and evaluate. Auto-detects single/multi-label from y shape."""
+    multi_label = y_train.ndim == 2
     best_c: float | None = None
-    best_val_acc = -1.0
+    best_val_score = -1.0
 
-    # Convert once to tensors (int64 labels for classification)
     x_train_tensor = torch.from_numpy(x_train)
-    y_train_tensor = torch.from_numpy(y_train).long()
     x_val_tensor = torch.from_numpy(x_val)
-    y_val_tensor = torch.from_numpy(y_val).long()
     x_test_tensor = torch.from_numpy(x_test)
-    y_test_tensor = torch.from_numpy(y_test).long()
+
+    if multi_label:
+        y_train_tensor = torch.from_numpy(y_train).float()
+        y_val_tensor = torch.from_numpy(y_val).float()
+        label_tag = "LogReg-ML"
+    else:
+        y_train_tensor = torch.from_numpy(y_train).long()
+        y_val_tensor = torch.from_numpy(y_val).long()
+        label_tag = "LogReg"
 
     if verbose:
         logger.info(
-            f"[LogReg] C sweep start over {len(c_values)} values (train={len(x_train)}, val={len(x_val)})"
+            f"[{label_tag}] C sweep start over {len(c_values)} values "
+            f"(train={len(x_train)}, val={len(x_val)})"
         )
         c_value_iterator = tqdm(c_values, desc="C values", leave=False)
     else:
@@ -171,26 +216,33 @@ def evaluate_logistic(
             tol=1e-6,
             random_state=seed,
             device=device,
+            multi_label=multi_label,
         )
         model.fit(x_train_tensor, y_train_tensor)
-        val_pred = model.predict(x_val_tensor)
-        acc_val = accuracy_score(y_val, val_pred)
+
+        if multi_label:
+            val_scores = model.predict_proba(x_val_tensor)
+            val_metric = float(average_precision_score(y_val, val_scores, average="micro"))
+        else:
+            val_pred = model.predict(x_val_tensor)
+            val_metric = accuracy_score(y_val, val_pred)
+
         if verbose and (idx < 10 or idx % 50 == 0):
-            logger.info(f"[LogReg] C={c:.4g} val_acc={acc_val:.4f}")
-        if acc_val > best_val_acc:
-            best_val_acc = acc_val
+            logger.info(f"[{label_tag}] C={c:.4g} val_score={val_metric:.4f}")
+        if val_metric > best_val_score:
+            best_val_score = val_metric
             best_c = c
 
     assert best_c is not None, "C sweep failed to select a value"
     if verbose:
-        logger.info(f"[LogReg] Best C={best_c:.4g} val_acc={best_val_acc:.4f}")
+        logger.info(f"[{label_tag}] Best C={best_c:.4g} val_score={best_val_score:.4f}")
 
     # Prepare final training tensors
     if merge_val:
         x_final_np = np.concatenate([x_train, x_val], axis=0)
         y_final_np = np.concatenate([y_train, y_val], axis=0)
         x_final = torch.from_numpy(x_final_np)
-        y_final = torch.from_numpy(y_final_np).long()
+        y_final = torch.from_numpy(y_final_np).float() if multi_label else torch.from_numpy(y_final_np).long()
     else:
         x_final = x_train_tensor
         y_final = y_train_tensor
@@ -201,16 +253,23 @@ def evaluate_logistic(
         tol=1e-6,
         random_state=seed,
         device=device,
+        multi_label=multi_label,
     )
     final_model.fit(x_final, y_final)
-    test_preds = final_model.predict(x_test_tensor)
 
-    acc, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
+    if multi_label:
+        test_scores = final_model.predict_proba(x_test_tensor)
+        metric, lo, hi = bootstrap_map(y_test, test_scores, n_boot=n_bootstrap, seed=seed)
+    else:
+        test_preds = final_model.predict(x_test_tensor)
+        metric, lo, hi = bootstrap_accuracy(y_test, test_preds, n_boot=n_bootstrap, seed=seed)
+
     if verbose:
         logger.info(
-            f"[LogReg] Test accuracy={acc:.4f} (CI {lo:.4f}-{hi:.4f}) using C={best_c:.4g}; train_final={len(x_final)} test={len(x_test)}"
+            f"[{label_tag}] Test score={metric:.4f} (CI {lo:.4f}-{hi:.4f}) "
+            f"using C={best_c:.4g}; train_final={len(x_final)} test={len(x_test)}"
         )
-    return acc, lo, hi, float(best_c)
+    return metric, lo, hi, float(best_c)
 
 
 def evaluate_segmentation(
@@ -369,6 +428,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         first_sample = train_dataset[0]
         num_channels = first_sample["image"].shape[0]
         is_segmentation = "mask" in first_sample
+        is_multilabel = ds_name in MULTILABEL_DATASETS
         num_classes = NUM_CLASSES_PER_DATASET.get(ds_name, 0)
 
         # Resume check for segmentation
@@ -439,6 +499,9 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                 ).to_row()
             )
         else:
+            # Classification (single-label or multi-label)
+            metric_name = "micro_mAP" if is_multilabel else "accuracy"
+
             skip_knn = cfg.resume and knn_key in completed_runs
             skip_linear = (cfg.resume and linear_key in completed_runs) or getattr(
                 cfg.eval, "skip_linear", False
@@ -453,7 +516,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             feature_dim = x_train.shape[1]
 
             if not skip_knn:
-                knn_acc, knn_lo, knn_hi = evaluate_knn(
+                knn_score, knn_lo, knn_hi = evaluate_knn(
                     x_train,
                     y_train,
                     x_test,
@@ -467,8 +530,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     EvaluationResult(
                         **common_meta,
                         method="knn5",
-                        metric_name="accuracy",
-                        metric_value=knn_acc,
+                        metric_name=metric_name,
+                        metric_value=knn_score,
                         ci_lower=knn_lo,
                         ci_upper=knn_hi,
                         feature_dim=feature_dim,
@@ -480,7 +543,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                 )
 
             if not skip_linear:
-                lin_acc, lin_lo, lin_hi, best_c = evaluate_logistic(
+                lin_score, lin_lo, lin_hi, best_c = evaluate_logistic(
                     x_train,
                     y_train,
                     x_val,
@@ -498,8 +561,8 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                     EvaluationResult(
                         **common_meta,
                         method="linear",
-                        metric_name="accuracy",
-                        metric_value=lin_acc,
+                        metric_name=metric_name,
+                        metric_value=lin_score,
                         ci_lower=lin_lo,
                         ci_upper=lin_hi,
                         feature_dim=feature_dim,
