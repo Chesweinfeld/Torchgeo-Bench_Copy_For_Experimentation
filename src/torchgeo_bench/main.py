@@ -365,6 +365,7 @@ def main(cfg: DictConfig) -> None:
 
     # Output file path
     output_path = cfg.output
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     def _append_rows_atomic(path: str, rows: list[dict]) -> None:
         """Append rows to CSV atomically with advisory file lock."""
