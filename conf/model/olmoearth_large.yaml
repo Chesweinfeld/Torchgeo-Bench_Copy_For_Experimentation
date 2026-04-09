@@ -3,7 +3,7 @@
 # Default: RGB mode (3 channels). For full S2, set num_channels=12 and dataset.bands=all
 # Run with: dataset.normalization=none
 
-_target_: src.models.OlmoEarthBenchModel
+_target_: torchgeo_bench.models.OlmoEarthBenchModel
 num_channels: 3
 model_size: large
 patch_size: 8

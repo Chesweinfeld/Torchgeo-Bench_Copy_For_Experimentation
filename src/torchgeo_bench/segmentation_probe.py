@@ -19,7 +19,6 @@ class SegmentationProbe(nn.Module):
         backbone: nn.Module,
         layer_names: list[str],
         num_classes: int,
-        in_channels: int = 3,
         input_size: int | None = None,
         freeze_backbone: bool = True,
         head_type: str = "linear",

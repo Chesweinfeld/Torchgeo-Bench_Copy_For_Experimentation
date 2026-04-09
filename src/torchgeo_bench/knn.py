@@ -4,9 +4,8 @@ Unified k-nearest neighbors classifier supporting both single-label and
 multi-label classification using FAISS for efficient nearest-neighbor search.
 """
 
-from __future__ import annotations
-
 import logging
+from typing import Any, Self
 
 import faiss
 import numpy as np
@@ -38,10 +37,17 @@ class KNNClassifier:
         self._y: np.ndarray | None = None
         self._multi_label: bool = False
         self._n_classes: int | None = None
-        self._gpu_res: faiss.StandardGpuResources | None = None
+        self._gpu_res: Any | None = None
 
     def _build_index(self, d: int) -> faiss.Index:
         if self.device != "cpu" and self.device.startswith("cuda"):
+            if not all(
+                hasattr(faiss, attr) for attr in ("StandardGpuResources", "GpuIndexFlatConfig")
+            ):
+                logger.warning(
+                    "CUDA device requested but faiss GPU support is unavailable; using CPU."
+                )
+                return faiss.IndexFlatL2(d)
             gpu_id = int(self.device.split(":")[-1]) if ":" in self.device else 0
             self._gpu_res = faiss.StandardGpuResources()
             config = faiss.GpuIndexFlatConfig()
@@ -49,7 +55,7 @@ class KNNClassifier:
             return faiss.GpuIndexFlatL2(self._gpu_res, d, config)
         return faiss.IndexFlatL2(d)
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> KNNClassifier:
+    def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
         """Index training features and store labels.
 
         Args:

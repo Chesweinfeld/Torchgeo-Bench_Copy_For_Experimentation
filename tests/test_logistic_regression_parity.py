@@ -4,7 +4,7 @@ import torch
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression as SkLogReg
 
-from src.linear import LogisticRegression
+from torchgeo_bench.linear import LogisticRegression
 
 
 @pytest.fixture(scope="module")

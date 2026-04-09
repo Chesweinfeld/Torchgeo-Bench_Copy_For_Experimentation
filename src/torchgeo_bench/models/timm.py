@@ -1,7 +1,5 @@
 """Timm backbone wrapper for patch-level feature extraction."""
 
-from __future__ import annotations
-
 import timm
 import torch
 import torch.nn.functional as F
@@ -45,7 +43,7 @@ class TimmPatchBenchModel(BenchModel):
         auto_resize: bool = False,
         target_size: int | None = None,
         use_cls_token: bool = False,
-        **kwargs,
+        **_kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
 
@@ -101,6 +99,7 @@ class TimmPatchBenchModel(BenchModel):
         Optionally resizes inputs to the backbone's expected resolution when
         ``auto_resize`` is enabled.
         """
+        del bboxes
         # Optionally resize to backbone's expected resolution. We assume square size.
         if self.auto_resize and self.target_size is not None:
             h, w = images.shape[-2], images.shape[-1]
@@ -134,14 +133,6 @@ class TimmPatchBenchModel(BenchModel):
             x = F.normalize(x, p=2, dim=-1)
 
         return x  # (B, K)
-
-    def forward_pixel_features(  # pragma: no cover - optional
-        self,
-        images: torch.Tensor,
-        bboxes: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Not implemented for TimmPatchBenchModel."""
-        raise NotImplementedError("Pixel features are not supported in TimmPatchBenchModel.")
 
     # ---- helpers ----
     def _has_cls_token_like(self) -> bool:

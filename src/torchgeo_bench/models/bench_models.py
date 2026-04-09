@@ -22,7 +22,7 @@ class RCFBench(BenchModel):
         stats_mode: str = "mean",
         seed: int | None = None,
         dataset: NonGeoDataset | None = None,
-        **kwargs,
+        **_kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
         self.rcf = RCF(
@@ -41,13 +41,14 @@ class RCFBench(BenchModel):
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return RCF embeddings for a batch of images."""
+        del bboxes
         return self.rcf(images)
 
 
 class ImageStatsBench(BenchModel):
     """BenchModel that returns per-image statistics (mean, std, min, max) as features."""
 
-    def __init__(self, num_channels: int, **kwargs) -> None:
+    def __init__(self, num_channels: int, **_kwargs) -> None:
         super().__init__(num_channels=num_channels)
 
     def forward_patch_features(
@@ -56,6 +57,7 @@ class ImageStatsBench(BenchModel):
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return per-channel image statistics (mean, std, max, min) as features."""
+        del bboxes
         # images: (B, C, H, W)
         feats = torch.cat(
             [

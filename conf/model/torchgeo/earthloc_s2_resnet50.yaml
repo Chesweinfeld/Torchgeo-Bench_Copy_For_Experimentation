@@ -1,7 +1,7 @@
 # torchgeo EarthLoc — Sentinel-2 ResNet50 (place-recognition descriptor)
 # Feature dimension: 4096
 
-_target_: src.models.TorchGeoEarthLocBench
+_target_: torchgeo_bench.models.TorchGeoEarthLocBench
 num_channels: 3
 factory: earthloc
 weights_class: EarthLoc_Weights

@@ -2,7 +2,7 @@
 # Feature dimension: 1280
 # Model: efficientnet_b0
 
-_target_: src.models.TimmPatchBenchModel
+_target_: torchgeo_bench.models.TimmPatchBenchModel
 num_channels: 3
 model_name: efficientnet_b0
 pretrained: true

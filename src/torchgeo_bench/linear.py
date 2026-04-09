@@ -1,9 +1,9 @@
 """Logistic regression (single-label and multi-label) with PyTorch optimizers."""
 
-from __future__ import annotations
-
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
+from typing import Self
 
 import numpy as np
 import torch
@@ -44,7 +44,7 @@ class LogisticRegression:
         self,
         C: float = 1.0,
         max_iter: int = 1000,
-        lr: float = 0.1,
+        lr: float = 1.0,
         batch_size: int = 1024,
         solver: str = "lbfgs",
         tol: float = 1e-4,
@@ -90,17 +90,17 @@ class LogisticRegression:
 
         # CUDA matmul speedup (TF32) if available & allowed
         if self.device.type == "cuda" and self.use_tf32:
-            try:
+            with suppress(Exception):
                 torch.set_float32_matmul_precision("high")
-            except Exception:
-                pass  # older PyTorch
 
     def _build_model(self, n_features: int, n_classes: int) -> None:
         model = torch.nn.Linear(n_features, n_classes, bias=True)
+        torch.nn.init.zeros_(model.weight)
+        torch.nn.init.zeros_(model.bias)
         model.to(self.device)
         self._model = model
 
-    def fit(self, X: Tensor, y: Tensor) -> LogisticRegression:
+    def fit(self, X: Tensor, y: Tensor) -> Self:
         """Fit the logistic regression model on training data.
 
         Args:

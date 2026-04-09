@@ -1,11 +1,10 @@
-
 import pytest
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.segmentation_probe import SegmentationProbe
-from src.segmentation_task import SegmentationSolver
+from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.segmentation_task import SegmentationSolver
 
 
 class MockBackbone(nn.Module):
@@ -57,6 +56,7 @@ def test_probe_dry_run_exception_handling():
             self.dummy_layer = nn.Linear(2, 2)
 
         def forward(self, x):
+            del x
             raise RuntimeError("Backbone crash")
 
     backbone = BrokenBackbone()

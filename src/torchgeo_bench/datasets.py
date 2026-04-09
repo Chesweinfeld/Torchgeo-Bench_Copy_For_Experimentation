@@ -126,10 +126,12 @@ def _get_datasets_v2(
     normalization: str,
 ):
     """Handles loading logic for V2 datasets."""
+    del normalization
     if partition_name != "default":
         warnings.warn(
             f"Partitions are not supported in GeoBench V2. Ignoring partition '{partition_name}'.",
             UserWarning,
+            stacklevel=2,
         )
 
     class_name = _get_v2_class_name(dataset_name)
@@ -349,7 +351,7 @@ def get_datasets(
         except TypeError:
             raise ValueError(
                 f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names."
-            )
+            ) from None
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(

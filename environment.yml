@@ -2,7 +2,7 @@ name: torchgeo-bench
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11,<3.13
+  - python>=3.12,<3.13
   - pip
   - pip:
       - numpy>=1.24.0
@@ -16,5 +16,5 @@ dependencies:
       - huggingface_hub>=0.20.0
       - torchgeo>=0.8.0
       - faiss-gpu>=1.7.0
-      - geobench_v2
+      - GeoBenchV2
       - -e .
