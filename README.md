@@ -31,13 +31,6 @@ torchgeo-bench download --version v2 --datasets caffe
 
 Available GeoBench v2 datasets: `benv2`, `biomassters`, `burn_scars`, `caffe`, `cloudsen12`, `dynamic_earthnet`, `everwatch`, `flair2`, `fotw`, `kuro_siwo`, `pastis`, `spacenet2`, `spacenet7`, `substation`, `treesatai`, `wind_turbine`, `so2sat`, `forestnet`
 
-Alternatively, you can still use the standalone script:
-
-```bash
-python torchgeo_bench_download.py --version v1
-python torchgeo_bench_download.py --version v2 --datasets forestnet
-```
-
 ## Overview
 
 `torchgeo-bench` provides:
@@ -102,12 +95,6 @@ uv run torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
 
 # Select specific GPU device
 uv run torchgeo-bench run device=cuda:1
-```
-
-Alternatively, you can still use the standalone script with Hydra directly:
-
-```bash
-uv run python -m torchgeo_bench model=timm/resnet50
 ```
 
 ## Model Interface

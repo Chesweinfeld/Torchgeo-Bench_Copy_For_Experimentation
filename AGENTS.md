@@ -73,8 +73,6 @@ uv run torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
 # Select specific GPU device
 uv run torchgeo-bench run device=cuda:1
 
-# Direct Hydra invocation
-uv run python -m torchgeo_bench model=timm/resnet50
 ```
 
 ## Datasets
