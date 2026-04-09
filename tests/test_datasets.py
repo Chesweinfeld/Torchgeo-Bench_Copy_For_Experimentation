@@ -4,7 +4,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET, get_datasets
 
 
 class TestGetDatasetsFunction:

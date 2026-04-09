@@ -2,7 +2,7 @@
 # Feature dimension: 2048
 # Model: resnet50
 
-_target_: src.models.TimmPatchBenchModel
+_target_: torchgeo_bench.models.TimmPatchBenchModel
 num_channels: 3
 model_name: resnet50
 pretrained: true

@@ -8,8 +8,8 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import NUM_CLASSES_PER_DATASET
-from src.geobench_dataset import GeoBenchDataset, get_geobench_dataset
+from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET
+from torchgeo_bench.geobench_dataset import GeoBenchDataset, get_geobench_dataset
 
 
 class TestGeoBenchDatasetBasics:

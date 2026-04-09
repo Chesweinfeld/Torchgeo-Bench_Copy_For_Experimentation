@@ -30,8 +30,7 @@ pyproject.toml        # Project config, dependencies, tool settings
 ## Environment Setup
 
 ```bash
-conda activate torchgeo-bench   # Always activate before running commands
-pip install -e ".[dev]"         # Or install with dev dependencies
+uv sync --extra dev             # Install dependencies and dev tools
 ```
 
 ## Build/Lint/Test Commands
@@ -39,11 +38,11 @@ pip install -e ".[dev]"         # Or install with dev dependencies
 ### Running Tests
 
 ```bash
-pytest                                    # Run ALL tests
-pytest tests/test_geobench_dataset.py -v  # Run a SINGLE test file
-pytest tests/test_geobench_dataset.py::TestClass::test_method -v  # Single function
-pytest -k "m-eurosat" -v                  # Run tests matching a pattern
-pytest --no-cov                           # Skip coverage for faster iteration
+uv run pytest                                    # Run ALL tests
+uv run pytest tests/test_geobench_dataset.py -v  # Run a SINGLE test file
+uv run pytest tests/test_geobench_dataset.py::TestClass::test_method -v  # Single function
+uv run pytest -k "m-eurosat" -v                  # Run tests matching a pattern
+uv run pytest --no-cov                           # Skip coverage for faster iteration
 ```
 
 Tests require GeoBench data. Set `GEOBENCH_ROOT` (V1) or `GEOBENCH_V2_ROOT` (V2) if data is not in default locations.
@@ -51,31 +50,31 @@ Tests require GeoBench data. Set `GEOBENCH_ROOT` (V1) or `GEOBENCH_V2_ROOT` (V2)
 ### Linting and Formatting
 
 ```bash
-ruff check .           # Check for lint errors
-ruff check . --fix     # Auto-fix lint errors
-ruff format .          # Format code
+uv run ruff check .           # Check for lint errors
+uv run ruff check . --fix     # Auto-fix lint errors
+uv run ruff format .          # Format code
 ```
 
 ### Running the Benchmark
 
 ```bash
 # Basic usage
-torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
+uv run torchgeo-bench run model=timm/resnet50 dataset.names=[m-eurosat]
 
 # Quick eval (skip linear probing, minimal bootstrap)
-torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+uv run torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
 
 # Resume a previously interrupted run (skips completed experiments)
-torchgeo-bench run resume=true
+uv run torchgeo-bench run resume=true
 
 # Evaluate segmentation datasets (V2)
-torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+uv run torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
 
 # Select specific GPU device
-torchgeo-bench run device=cuda:1
+uv run torchgeo-bench run device=cuda:1
 
 # Direct Hydra invocation
-python torchgeo_bench.py model=timm/resnet50
+uv run python -m torchgeo_bench model=timm/resnet50
 ```
 
 ## Datasets
@@ -95,23 +94,21 @@ python torchgeo_bench.py model=timm/resnet50
 
 ### Python Version and Type Hints
 
-- **Python 3.11+** (targeting 3.12)
+- **Python 3.12+** (targeting 3.12)
 - Use modern type hints: `list[str]`, `dict[str, Any]`, `X | None`
 - Do NOT use deprecated typing imports: `List`, `Dict`, `Optional`, `Union`
-- Use `from __future__ import annotations` for forward references
+- Do NOT use `from __future__ import annotations`; use `Self`, quoted annotations, or explicit imports for forward references
 
 ### Import Ordering
 
 ```python
-from __future__ import annotations
-
 import logging                          # 1. Standard library
 from dataclasses import dataclass
 
 import numpy as np                      # 2. Third-party
 import torch
 
-from src.datasets import get_datasets   # 3. Local imports
+from torchgeo_bench.datasets import get_datasets   # 3. Local imports
 
 logger = logging.getLogger(__name__)
 ```

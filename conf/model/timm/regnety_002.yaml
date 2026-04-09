@@ -2,7 +2,7 @@
 # Feature dimension: 368
 # Model: regnety_002
 
-_target_: src.models.TimmPatchBenchModel
+_target_: torchgeo_bench.models.TimmPatchBenchModel
 num_channels: 3
 model_name: regnety_002
 pretrained: true

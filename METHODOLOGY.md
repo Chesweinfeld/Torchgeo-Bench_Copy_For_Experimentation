@@ -1,6 +1,6 @@
 # Methodology
 
-This document describes the evaluation methodology used by `torchgeo_bench.py` for each of the supported task types. In all cases the backbone model is kept **frozen** — the benchmark measures the quality of learned representations, not end-to-end fine-tuning performance.
+This document describes the evaluation methodology used by `torchgeo_bench.main` for each of the supported task types. In all cases the backbone model is kept **frozen** — the benchmark measures the quality of learned representations, not end-to-end fine-tuning performance.
 
 ---
 

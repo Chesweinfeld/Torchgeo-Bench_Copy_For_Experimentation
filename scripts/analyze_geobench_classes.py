@@ -10,14 +10,13 @@ This script inspects all datasets to find:
 Useful for configuring ignore_index in segmentation tasks.
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 import sys
 from collections import Counter
 from pathlib import Path
 
+import geobench_v2.datasets as gb_v2
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -27,8 +26,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-import geobench_v2.datasets as gb_v2
 
 # Dataset registry with their class names and task types
 GEOBENCH_V2_DATASETS = {
@@ -148,7 +145,11 @@ def analyze_dataset(
 
                 # Convert to tensor if needed
                 if isinstance(values, list):
-                    values = torch.stack(values) if all(isinstance(v, torch.Tensor) for v in values) else torch.tensor(values)
+                    values = (
+                        torch.stack(values)
+                        if all(isinstance(v, torch.Tensor) for v in values)
+                        else torch.tensor(values)
+                    )
 
                 # Get unique values
                 unique = torch.unique(values).tolist()
@@ -246,7 +247,8 @@ def main() -> int:
         help="DataLoader workers (default: 0)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose output",
     )
@@ -302,9 +304,9 @@ def main() -> int:
             print(f"\n✗ {dataset_name}: {result.get('message', 'Error')}")
             continue
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Dataset: {dataset_name} ({result['task_type']})")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"  Samples checked: {result['samples_checked']}")
         print(f"  Unique values: {result['all_unique_values']}")
         print(f"  Min value: {result['min_value']}")
@@ -317,7 +319,9 @@ def main() -> int:
             if "error" in split_data:
                 print(f"  {split}: ERROR - {split_data['error']}")
             else:
-                print(f"  {split}: values={split_data['unique_values'][:10]}{'...' if len(split_data['unique_values']) > 10 else ''}")
+                print(
+                    f"  {split}: values={split_data['unique_values'][:10]}{'...' if len(split_data['unique_values']) > 10 else ''}"
+                )
 
     # Print config suggestions
     print("\n" + "=" * 80)
@@ -338,6 +342,7 @@ def main() -> int:
     # Save to JSON if requested
     if args.output:
         import json
+
         with open(args.output, "w") as f:
             json.dump(all_results, f, indent=2, default=list)
         logger.info(f"Results saved to {args.output}")

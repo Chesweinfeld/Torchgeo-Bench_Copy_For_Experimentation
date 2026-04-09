@@ -17,13 +17,13 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.datasets import NUM_CLASSES_PER_DATASET, get_datasets
-from src.knn import KNNClassifier
-from src.linear import LogisticRegression
-from src.models.interface import BenchModel
-from src.segmentation_probe import SegmentationProbe
-from src.segmentation_task import SegmentationSolver
-from src.utils import extract_features
+from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from torchgeo_bench.knn import KNNClassifier
+from torchgeo_bench.linear import LogisticRegression
+from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.segmentation_probe import SegmentationProbe
+from torchgeo_bench.segmentation_task import SegmentationSolver
+from torchgeo_bench.utils import extract_features
 
 logger = logging.getLogger(__name__)
 
@@ -223,11 +223,9 @@ def evaluate_logistic(
 
     if multi_label:
         y_train_tensor = torch.from_numpy(y_train).float()
-        y_val_tensor = torch.from_numpy(y_val).float()
         label_tag = "LogReg-ML"
     else:
         y_train_tensor = torch.from_numpy(y_train).long()
-        y_val_tensor = torch.from_numpy(y_val).long()
         label_tag = "LogReg"
 
     if verbose:
@@ -323,14 +321,10 @@ def evaluate_segmentation(
     if "segmentation" not in eval_cfg:
         raise ValueError("Segmentation evaluation config missing for the model.")
 
-    if "segmentation" not in cfg.eval:
-        raise ValueError("Segmentation evaluation config missing for the model.")
-
     probe = SegmentationProbe(
         backbone=model,
         layer_names=eval_cfg.segmentation.layers,
         num_classes=num_classes,
-        in_channels=cfg.model.num_channels,
         head_type=eval_cfg.segmentation.head_type,
         freeze_backbone=True,
     )
@@ -350,7 +344,7 @@ def evaluate_segmentation(
     )
 
     miou = solver.evaluate(test_loader)
-    feature_dim = probe._dry_run_channels()  # Dynamically get concat dim
+    feature_dim = sum(probe.channels_list)
 
     return miou, feature_dim
 
@@ -360,7 +354,7 @@ def evaluate_segmentation(
 # ---------------------------------------------------------------------------
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
+@hydra.main(config_path="../../conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)

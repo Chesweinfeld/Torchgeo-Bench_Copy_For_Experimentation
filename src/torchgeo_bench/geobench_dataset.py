@@ -4,14 +4,12 @@ This provides a lightweight alternative to the geobench library that directly
 accesses HDF5 files and partition JSON files.
 """
 
-from __future__ import annotations
-
 import json
 import pickle
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import h5py
 import numpy as np
@@ -54,7 +52,7 @@ class BandStats:
     percentile_99_9: float | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> BandStats:
+    def from_dict(cls, d: dict) -> Self:
         """Create BandStats from dictionary.
 
         Args:

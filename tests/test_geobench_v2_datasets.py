@@ -6,7 +6,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from src.datasets import get_datasets
+from torchgeo_bench.datasets import get_datasets
 
 
 class MockV2Dataset:
@@ -41,7 +41,7 @@ class MockV2Dataset:
 
 @pytest.fixture
 def mock_v2_env():
-    with patch("src.datasets.gb_v2") as mock_pkg:
+    with patch("torchgeo_bench.datasets.gb_v2") as mock_pkg:
         # Side_effect ensures we get fresh instances
         mock_pkg.GeoBenchBENV2 = MagicMock(side_effect=MockV2Dataset)
         mock_pkg.GeoBenchBiomassters = MagicMock(side_effect=MockV2Dataset)
@@ -52,6 +52,7 @@ def mock_v2_env():
 
 class TestV2Loading:
     def test_benv2_classification(self, mock_v2_env):
+        del mock_v2_env
         ds, train_dl, val_dl, test_dl = get_datasets(
             dataset_name="benv2",
             return_val=True,
@@ -69,6 +70,7 @@ class TestV2Loading:
         assert "label" in batch
 
     def test_biomassters_segmentation(self, mock_v2_env):
+        del mock_v2_env
         ds, train_dl, test_dl = get_datasets(
             dataset_name="biomassters",
             batch_size=2,
@@ -84,6 +86,7 @@ class TestV2Loading:
         assert batch["image"].shape[0] == 2
 
     def test_partition_warning(self, mock_v2_env):
+        del mock_v2_env
         with pytest.warns(UserWarning, match="Partitions are not supported in GeoBench V2"):
             get_datasets(
                 dataset_name="benv2",
@@ -93,6 +96,7 @@ class TestV2Loading:
             )
 
     def test_resize_transform(self, mock_v2_env):
+        del mock_v2_env
         target = 64
         ds, _, _ = get_datasets(
             dataset_name="benv2",
@@ -111,7 +115,11 @@ class TestV2Loading:
     def test_bad_dataset_name(self, mock_v2_env):
         mock_v2_env.GeoBenchPhantomDataset = None
 
-        with patch("src.datasets.V2_DATASETS", {"phantom_dataset"}):
-            # Matches strict string in src/datasets.py
-            with pytest.raises(ValueError, match="Could not find V2 dataset class"):
-                get_datasets(dataset_name="phantom_dataset", geobench_v2_root="/tmp")
+        with (
+            patch("torchgeo_bench.datasets.V2_DATASETS", {"phantom_dataset"}),
+            pytest.raises(
+                ValueError,
+                match="Could not find V2 dataset class",
+            ),
+        ):
+            get_datasets(dataset_name="phantom_dataset", geobench_v2_root="/tmp")

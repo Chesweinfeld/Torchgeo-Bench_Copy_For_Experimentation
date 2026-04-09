@@ -59,46 +59,55 @@ python torchgeo_bench_download.py --version v2 --datasets forestnet
 git clone <repository-url>
 cd torchgeo-bench
 
-# Install dependencies (Python 3.12+)
-pip install -e .
-
-# Or using conda
-conda env create -f environment.yml
-conda activate torchgeo-bench
+# Install dependencies and dev tools
+uv sync --extra dev
 ```
+
+## Releasing to PyPI
+
+1. Set up a [PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/) for this
+   repository with environment name `pypi`.
+2. Create and push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The GitHub Actions release workflow will automatically build and publish to PyPI.
 
 ### Basic Usage
 
 ```bash
 # Run benchmark with default RCF model on all datasets (expects GeoBench data in 'data/')
-torchgeo-bench run
+uv run torchgeo-bench run
 
 # Use pretrained ResNet50 (timm/ImageNet)
-torchgeo-bench run model=timm/resnet50
+uv run torchgeo-bench run model=timm/resnet50
 
 # Benchmark on specific datasets with verbose output
-torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
+uv run torchgeo-bench run dataset.names=[m-eurosat,m-forestnet] verbose=true
 
 # Quick evaluation (skip linear probing, minimal bootstrap)
-torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
+uv run torchgeo-bench run eval.skip_linear=true eval.bootstrap=100
 
 # Use smaller training partition
-torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
+uv run torchgeo-bench run dataset.partition=0.01x_train output=results_1pct.csv
 
 # Resume a previously interrupted run (skips completed experiments)
-torchgeo-bench run resume=true
+uv run torchgeo-bench run resume=true
 
 # Evaluate segmentation datasets
-torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
+uv run torchgeo-bench run dataset.names=[burn_scars,pastis,flair2]
 
 # Select specific GPU device
-torchgeo-bench run device=cuda:1
+uv run torchgeo-bench run device=cuda:1
 ```
 
 Alternatively, you can still use the standalone script with Hydra directly:
 
 ```bash
-python torchgeo_bench.py model=timm/resnet50
+uv run python -m torchgeo_bench model=timm/resnet50
 ```
 
 ## Model Interface
@@ -106,21 +115,22 @@ python torchgeo_bench.py model=timm/resnet50
 To benchmark your own model, implement the `BenchModel` abstract base class:
 
 ```python
-from src.interface import BenchModel
 import torch
+
+from torchgeo_bench.models.interface import BenchModel
 
 class MyModel(BenchModel):
     def __init__(self, num_channels: int, **kwargs):
         super().__init__(num_channels=num_channels)
         # num_channels varies per dataset (e.g., 3 for RGB)
         self.backbone = create_my_backbone(in_channels=num_channels)
-    
+
     def forward_features(self, images: torch.Tensor, bboxes=None) -> torch.Tensor:
         """
         Args:
             images: (B, C, H, W) tensor in [0, 1] range (after normalization)
             bboxes: Optional (B, 4) geographic bounds (minx, miny, maxx, maxy)
-        
+
         Returns:
             embeddings: (B, K) tensor
         """
@@ -141,7 +151,7 @@ pretrained: true
 Then run:
 
 ```bash
-torchgeo-bench run model=mymodel
+uv run torchgeo-bench run model=mymodel
 ```
 
 ## Available Models
@@ -151,17 +161,17 @@ Gaussian or empirical random features à la MOSAIKS.
 
 ```bash
 # Gaussian RCF
-torchgeo-bench run model=rcf
+uv run torchgeo-bench run model=rcf
 
 # Empirical RCF (samples patches from training data)
-torchgeo-bench run model=rcf model.mode=empirical model.features=1024
+uv run torchgeo-bench run model=rcf model.mode=empirical model.features=1024
 ```
 
 ### Timm ResNet50
 Pretrained ImageNet ResNet50 from `timm`.
 
 ```bash
-torchgeo-bench run model=timm/resnet50
+uv run torchgeo-bench run model=timm/resnet50
 ```
 
 ### Vision Transformers (ViT / DeiT / Swin)
@@ -169,10 +179,10 @@ Configs generated under `conf/model/timm/vit/` (see `create_vit_configs.py`). Vi
 
 ```bash
 # Resize all dataset tiles to 224 (bicubic by default)
-torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224
 
 # Use bilinear interpolation
-torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 dataset.image_size=224 dataset.interpolation=bilinear
 ```
 
 If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `auto_resize` remains available as a fallback but dataset-level resizing is preferred for consistency across models.
@@ -180,15 +190,15 @@ If you omit `dataset.image_size`, native tile sizes are preserved. Model-level `
 Examples:
 
 ```bash
-torchgeo-bench run model=timm/vit/vit_base_patch16_224
-torchgeo-bench run model=timm/vit/deit_small_patch16_224 dataset.names=[m-eurosat]
-torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224
+uv run torchgeo-bench run model=timm/vit/deit_small_patch16_224 dataset.names=[m-eurosat]
+uv run torchgeo-bench run model=timm/vit/swin_base_patch4_window7_224 eval.skip_linear=true
 ```
 
 To study scale effects without resizing, simply avoid setting `dataset.image_size` and (optionally) disable the model fallback:
 
 ```bash
-torchgeo-bench run model=timm/vit/vit_base_patch16_224 model.auto_resize=false
+uv run torchgeo-bench run model=timm/vit/vit_base_patch16_224 model.auto_resize=false
 ```
 
 ### torchgeo Foundation Models (RGB)
@@ -196,20 +206,20 @@ Pretrained geospatial foundation models loaded via `torchgeo.models`. Configs un
 
 ```bash
 # Sentinel-2 RGB self-supervised (MoCo, SeCo, GASSL, Satlas)
-torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
-torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
+uv run torchgeo-bench run model=torchgeo/resnet50_s2rgb_moco
+uv run torchgeo-bench run model=torchgeo/resnet18_s2rgb_seco
 
 # ScaleMAE (fMoW RGB)
-torchgeo-bench run model=torchgeo/scalemae_large_fmow
+uv run torchgeo-bench run model=torchgeo/scalemae_large_fmow
 
 # DOFA — band-agnostic (RGB wavelengths)
-torchgeo-bench run model=torchgeo/dofa_base
+uv run torchgeo-bench run model=torchgeo/dofa_base
 
 # Swin-V2-B with Satlas (NAIP / Sentinel-2 RGB)
-torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
+uv run torchgeo-bench run model=torchgeo/swinv2b_naip_satlas_mi
 
 # EarthLoc (place-recognition descriptor)
-torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
+uv run torchgeo-bench run model=torchgeo/earthloc_s2_resnet50
 ```
 
 ## Datasets
@@ -330,7 +340,7 @@ torchgeo-bench run eval.segmentation.epochs=5 eval.segmentation.lr=0.0001
 For each classification dataset:
 
 1. **Model Initialization**: Instantiate model with dataset's `num_channels`
-2. **Feature Extraction**: 
+2. **Feature Extraction**:
    - Embed train, validation, and test sets
    - Returns (B, K) numpy arrays
 3. **KNN-5 Evaluation**:

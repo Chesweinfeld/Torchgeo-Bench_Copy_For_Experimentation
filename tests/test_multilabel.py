@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import torch
 
-from src.knn import KNNClassifier
-from src.linear import LogisticRegression
+from torchgeo_bench.knn import KNNClassifier
+from torchgeo_bench.linear import LogisticRegression
 
 
 @pytest.fixture

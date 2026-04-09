@@ -1,7 +1,7 @@
 # torchgeo DOFA-Large — MAE pretraining (band-agnostic, RGB wavelengths)
 # Feature dimension: 1024
 
-_target_: src.models.TorchGeoDOFABench
+_target_: torchgeo_bench.models.TorchGeoDOFABench
 num_channels: 3
 factory: dofa_large_patch16_224
 weights_class: DOFALarge16_Weights

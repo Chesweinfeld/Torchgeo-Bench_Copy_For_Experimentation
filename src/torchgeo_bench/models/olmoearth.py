@@ -13,8 +13,6 @@ Reference implementation:
     https://github.com/isaaccorley/geopool/blob/main/scripts/embed_olmoearth.py
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Literal
 
@@ -94,7 +92,7 @@ class OlmoEarthBenchModel(BenchModel):
         time_steps: int = 3,
         std_multiplier: float = 2.0,
         normalize: bool = False,
-        **kwargs,
+        **_kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
 
@@ -160,6 +158,7 @@ class OlmoEarthBenchModel(BenchModel):
             Embeddings of shape ``(B, D)`` where D depends on model_size:
             nano=128, tiny=192, base=768, large=1024.
         """
+        del bboxes
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import PoolingType
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (
             MaskedOlmoEarthSample,

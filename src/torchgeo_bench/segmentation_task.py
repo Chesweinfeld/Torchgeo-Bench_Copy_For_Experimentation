@@ -83,10 +83,9 @@ class SegmentationSolver:
                 self.model.backbone.eval()
 
             total_loss = 0.0
-            num_batches = 0
 
             pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            for batch in pbar:
+            for _num_batches, batch in enumerate(pbar, start=1):
                 if isinstance(batch, dict):
                     images = batch["image"].to(self.device)
                     masks = batch["mask"].to(self.device).long()
@@ -103,7 +102,6 @@ class SegmentationSolver:
                 self.optimizer.step()
 
                 total_loss += loss.item()
-                num_batches += 1
                 pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             if val_loader and verbose:

@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def download_command(args: argparse.Namespace) -> int:
     """Execute the download command."""
     # Import here to avoid loading heavy dependencies for --help
-    from src.download import (
+    from torchgeo_bench.download import (
         download_geobench_v1,
         download_geobench_v2,
     )
@@ -37,22 +37,13 @@ def download_command(args: argparse.Namespace) -> int:
 def run_command(args: argparse.Namespace) -> int:
     """Execute the run command."""
     import subprocess
-    from pathlib import Path
 
     # Pass through all arguments after 'run'
     hydra_args = args.hydra_args if args.hydra_args else []
 
-    # Find the torchgeo_bench.py script
-    script_dir = Path(__file__).parent.parent
-    script_path = script_dir / "torchgeo_bench.py"
-
-    if not script_path.exists():
-        logger.error(f"Could not find torchgeo_bench.py at {script_path}")
-        return 1
-
     # Run the script directly with subprocess to preserve Hydra's argument handling
     try:
-        cmd = [sys.executable, str(script_path)] + hydra_args
+        cmd = [sys.executable, "-m", "torchgeo_bench"] + hydra_args
         result = subprocess.run(cmd, check=False)
         return result.returncode
     except Exception as e:
@@ -112,7 +103,7 @@ def main() -> int:
     )
 
     # Run command - just show basic help since actual parsing is done above
-    run_parser = subparsers.add_parser(
+    subparsers.add_parser(
         "run",
         help="Run benchmark experiments with Hydra configuration",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -123,7 +114,7 @@ def main() -> int:
     if args.command == "download":
         return download_command(args)
     elif args.command == "run":
-        assert False, "This should never be reached due to special handling above."
+        raise AssertionError("This should never be reached due to special handling above.")
     else:
         parser.print_help()
         return 1
