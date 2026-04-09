@@ -17,7 +17,7 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET, get_datasets
+from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET, get_datasets, is_dataset_available
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
@@ -436,22 +436,26 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{cfg.eval.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
-        try:
-            result = get_datasets(
-                dataset_name=ds_name,
-                partition_name=cfg.dataset.partition,
-                batch_size=cfg.dataset.batch_size,
-                normalization=cfg.dataset.normalization,
-                return_val=True,
-                image_size=getattr(cfg.dataset, "image_size", None),
-                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-                geobench_root=getattr(cfg.dataset, "geobench_root", None),
-                geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-                bands=getattr(cfg.dataset, "bands", "rgb"),
-            )
-        except (FileNotFoundError, OSError, ValueError) as exc:
-            logger.warning(f"Skipping dataset {ds_name} (not available: {exc})")
+        if not is_dataset_available(
+            ds_name,
+            geobench_root=getattr(cfg.dataset, "geobench_root", None),
+            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
+        ):
+            logger.warning(f"Skipping dataset {ds_name} (data not found on disk)")
             continue
+
+        result = get_datasets(
+            dataset_name=ds_name,
+            partition_name=cfg.dataset.partition,
+            batch_size=cfg.dataset.batch_size,
+            normalization=cfg.dataset.normalization,
+            return_val=True,
+            image_size=getattr(cfg.dataset, "image_size", None),
+            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+            geobench_root=getattr(cfg.dataset, "geobench_root", None),
+            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
+            bands=getattr(cfg.dataset, "bands", "rgb"),
+        )
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             logger.warning(f"Skipping dataset {ds_name} (unexpected return)")
             continue

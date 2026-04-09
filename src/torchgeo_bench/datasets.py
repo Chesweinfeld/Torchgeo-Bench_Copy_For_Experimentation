@@ -247,6 +247,31 @@ def _get_datasets_v1(
     return train_dataset, train_loader, test_loader
 
 
+def is_dataset_available(
+    dataset_name: str,
+    geobench_root: str | None = None,
+    geobench_v2_root: str | None = None,
+) -> bool:
+    """Check whether the data directory for a dataset exists on disk.
+
+    Args:
+        dataset_name: Name of the dataset (e.g., ``"m-eurosat"``).
+        geobench_root: Root directory for V1 data.
+        geobench_v2_root: Root directory for V2 data.
+
+    Returns:
+        True if the dataset directory exists.
+    """
+    if geobench_root is None:
+        geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
+    if geobench_v2_root is None:
+        geobench_v2_root = os.getenv("GEOBENCH_V2_ROOT", DEFAULT_GEOBENCH_V2_ROOT)
+
+    if dataset_name in V2_DATASETS:
+        return os.path.isdir(os.path.join(geobench_v2_root, dataset_name))
+    return os.path.isdir(os.path.join(geobench_root, dataset_name))
+
+
 def get_datasets(
     dataset_name: str = "m-forestnet",
     partition_name: str = "default",
