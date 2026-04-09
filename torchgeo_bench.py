@@ -35,7 +35,15 @@ logger = logging.getLogger(__name__)
 MULTILABEL_DATASETS = {"m-bigearthnet"}
 
 
-def _expand_dataset_list(names):
+def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
+    """Expand dataset names to a flat list.
+
+    Args:
+        names: Dataset name(s) — ``"all"``, comma-separated string, or sequence.
+
+    Returns:
+        List of individual dataset name strings.
+    """
     if isinstance(names, str):
         if names == "all":
             return list(NUM_CLASSES_PER_DATASET.keys())
@@ -50,6 +58,18 @@ def bootstrap_accuracy(
     ci: float = 95.0,
     seed: int | None = None,
 ) -> tuple[float, float, float]:
+    """Compute accuracy with bootstrapped confidence interval.
+
+    Args:
+        y_true: Ground-truth labels.
+        y_pred: Predicted labels.
+        n_boot: Number of bootstrap resamples.
+        ci: Confidence interval width in percent.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Tuple of (mean_accuracy, ci_lower, ci_upper).
+    """
     rng = np.random.default_rng(seed)
     n = len(y_true)
     accs = np.empty(n_boot, dtype=np.float32)
@@ -82,9 +102,7 @@ def bootstrap_map(
         # Skip degenerate resamples with no positive labels
         if yt.sum() == 0:
             continue
-        valid_maps.append(
-            average_precision_score(yt, y_scores[idx], average="micro")
-        )
+        valid_maps.append(average_precision_score(yt, y_scores[idx], average="micro"))
     if not valid_maps:
         return map_mean, map_mean, map_mean
     maps = np.array(valid_maps, dtype=np.float32)
@@ -94,8 +112,11 @@ def bootstrap_map(
     upper = float(np.percentile(maps, hi))
     return map_mean, lower, upper
 
+
 @dataclass
 class EvaluationResult:
+    """Container for a single evaluation result row."""
+
     dataset: str
     method: str  # 'knn5' or 'linear' seg_linear, seg_conv
     metric_name: str  # 'accuracy' or 'mIoU'
@@ -121,13 +142,24 @@ class EvaluationResult:
     bootstrap: int
 
     def to_row(self) -> dict:
+        """Convert to a flat dictionary suitable for CSV/DataFrame export."""
         return self.__dict__.copy()
 
 
 def embed_split(
-    model: BenchModel, dataloader, device: torch.device, verbose: bool
+    model: BenchModel, dataloader: DataLoader, device: torch.device, verbose: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    # Leverage existing util which handles different model output shapes.
+    """Extract feature embeddings and labels from a data split.
+
+    Args:
+        model: The benchmark model to extract features with.
+        dataloader: DataLoader for the split.
+        device: Torch device to run inference on.
+        verbose: Whether to show a progress bar.
+
+    Returns:
+        Tuple of (features, labels) as NumPy arrays.
+    """
     return extract_features(model, dataloader, device, transforms=None, verbose=verbose)
 
 
@@ -148,9 +180,7 @@ def evaluate_knn(
 
     if multi_label:
         if verbose:
-            logger.info(
-                f"[KNN] Fit KNN5 multilabel (train={len(x_train)}, test={len(x_test)})"
-            )
+            logger.info(f"[KNN] Fit KNN5 multilabel (train={len(x_train)}, test={len(x_test)})")
         y_scores = clf.predict_proba(x_test)
         metric, lo, hi = bootstrap_map(y_test, y_scores, n_boot=n_bootstrap, seed=seed)
         if verbose:
@@ -242,7 +272,11 @@ def evaluate_logistic(
         x_final_np = np.concatenate([x_train, x_val], axis=0)
         y_final_np = np.concatenate([y_train, y_val], axis=0)
         x_final = torch.from_numpy(x_final_np)
-        y_final = torch.from_numpy(y_final_np).float() if multi_label else torch.from_numpy(y_final_np).long()
+        y_final = (
+            torch.from_numpy(y_final_np).float()
+            if multi_label
+            else torch.from_numpy(y_final_np).long()
+        )
     else:
         x_final = x_train_tensor
         y_final = y_train_tensor
@@ -282,7 +316,6 @@ def evaluate_segmentation(
     device: torch.device,
 ) -> tuple[float, int]:
     """Evaluate segmentation performance using a segmentation probe and solver."""
-
     # merge with model specific eval config if present
     eval_cfg = cfg.eval
     if "eval" in cfg.model and cfg.model.eval is not None:
@@ -322,15 +355,14 @@ def evaluate_segmentation(
     return miou, feature_dim
 
 
-# (logging already imported above)
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
-def main(cfg: DictConfig) -> None:  # noqa: D401
+def main(cfg: DictConfig) -> None:
+    """Run the benchmark pipeline for all configured datasets and models."""
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
 
@@ -345,7 +377,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         if not rows:
             return
         df_local = pd.DataFrame(rows)
-        # Open file in append+read mode; create if not exists
+        # Open file in read-write mode; create if not exists
         fd = os.open(path, os.O_RDWR | os.O_CREAT)
         with os.fdopen(fd, "r+", closefd=True) as f:
             # Acquire exclusive lock
@@ -384,10 +416,12 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
                         str(row.get("partition", "")),
                     )
                 )
-            print(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
-            print(f"Will skip already-computed (dataset, method, model, config) combinations.")
+            logger.info(
+                f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}"
+            )
+            logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
         except Exception as e:
-            print(f"Warning: Could not load existing results for resume: {e}")
+            logger.warning(f"Could not load existing results for resume: {e}")
             completed_runs = set()
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
@@ -420,7 +454,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
             bands=getattr(cfg.dataset, "bands", "rgb"),
         )
         if result is None or not isinstance(result, tuple) or len(result) != 4:
-            print(f"Skipping dataset {ds_name} (unexpected return)")
+            logger.warning(f"Skipping dataset {ds_name} (unexpected return)")
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
@@ -434,7 +468,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         # Resume check for segmentation
         if is_segmentation and cfg.resume and seg_key in completed_runs:
             if cfg.verbose:
-                print(f"[{ds_name}] Skipping segmentation (already computed)")
+                logger.info(f"[{ds_name}] Skipping segmentation (already computed)")
             continue
 
         # Instantiate Backbone
@@ -576,7 +610,7 @@ def main(cfg: DictConfig) -> None:  # noqa: D401
         _append_rows_atomic(output_path, all_rows)
         all_rows.clear()
 
-    print(f"Benchmark complete. Results appended to {output_path}")
+    logger.info(f"Benchmark complete. Results appended to {output_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover

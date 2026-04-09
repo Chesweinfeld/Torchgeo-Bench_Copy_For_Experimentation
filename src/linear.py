@@ -1,3 +1,5 @@
+"""Logistic regression (single-label and multi-label) with PyTorch optimizers."""
+
 from __future__ import annotations
 
 import logging
@@ -18,17 +20,22 @@ class _TrainStats:
 
 
 class LogisticRegression:
-    """
-    Multinomial logistic regression with identical objective scaling to sklearn:
+    """Logistic regression with identical objective scaling to sklearn.
+
+    Supports both single-label (softmax cross-entropy) and multi-label
+    (sigmoid BCE) classification via the ``multi_label`` flag.
+
+    Objective::
 
         loss = (1/n) * CrossEntropy + (1/n) * 0.5/C * ||W||^2
 
-        Differences from the previous version (speed-oriented but same math):
-            - LBFGS uses its internal iteration loop (one external .step).
-            - Adam uses on-device manual batching (no DataLoader overhead).
-            - Inference paths use torch.inference_mode.
-            - Optional TF32 for CUDA matmul (single linear layer still benefits slightly).
-            - Coefficients and intercept are exposed via properties (no copying at fit time).
+    Differences from the previous version (speed-oriented but same math):
+
+    - LBFGS uses its internal iteration loop (one external ``.step``).
+    - Adam uses on-device manual batching (no DataLoader overhead).
+    - Inference paths use ``torch.inference_mode``.
+    - Optional TF32 for CUDA matmul (single linear layer still benefits slightly).
+    - Coefficients and intercept are exposed via properties (no copying at fit time).
 
     Args match previous class unless noted.
     """
@@ -94,6 +101,20 @@ class LogisticRegression:
         self._model = model
 
     def fit(self, X: Tensor, y: Tensor) -> LogisticRegression:
+        """Fit the logistic regression model on training data.
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+            y: Labels — ``(n_samples,)`` for single-label or
+               ``(n_samples, n_classes)`` for multi-label.
+
+        Returns:
+            Self, for method chaining.
+
+        Raises:
+            TypeError: If X or y is not a torch.Tensor.
+            ValueError: If shapes are invalid or data is empty.
+        """
         if not torch.is_tensor(X):
             raise TypeError("X must be a torch.Tensor")
         if not torch.is_tensor(y):
@@ -232,6 +253,7 @@ class LogisticRegression:
 
     @property
     def coef_(self) -> np.ndarray:
+        """Return learned weight matrix as a NumPy array of shape ``(n_classes, n_features)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing coef_.")
         with torch.inference_mode():
@@ -239,12 +261,21 @@ class LogisticRegression:
 
     @property
     def intercept_(self) -> np.ndarray:
+        """Return learned bias vector as a NumPy array of shape ``(n_classes,)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing intercept_.")
         with torch.inference_mode():
             return self._model.bias.detach().cpu().numpy()
 
     def predict(self, X: Tensor) -> np.ndarray:
+        """Predict class labels (single-label) or binary indicators (multi-label).
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Predicted labels as a NumPy array.
+        """
         probs = self.predict_proba(X)
         if self.multi_label:
             return (probs > 0.5).astype(np.int32)
@@ -253,6 +284,14 @@ class LogisticRegression:
         return self.classes_[idx]
 
     def predict_proba(self, X: Tensor) -> np.ndarray:
+        """Predict per-class probabilities.
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Probability matrix of shape ``(n_samples, n_classes)``.
+        """
         if not self._fitted or self._model is None or self.classes_ is None:
             raise RuntimeError("Model has not been fit yet.")
         if not torch.is_tensor(X):
@@ -270,6 +309,14 @@ class LogisticRegression:
         return probs
 
     def decision_function(self, X: Tensor) -> np.ndarray:
+        """Compute raw logits (decision function values).
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Logits array of shape ``(n_samples, n_classes)``.
+        """
         if not self._fitted or self._model is None:
             raise RuntimeError("Model has not been fit yet.")
         if not torch.is_tensor(X):

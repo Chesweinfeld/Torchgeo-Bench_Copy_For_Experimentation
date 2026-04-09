@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _resolve_torchgeo_factory(factory_name: str):
     """Return the model-factory function from ``torchgeo.models``."""
     import torchgeo.models as tgm
@@ -65,6 +66,7 @@ def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
 # ResNet (timm backbone loaded via torchgeo)
 # ---------------------------------------------------------------------------
 
+
 class TorchGeoResNetBench(BenchModel):
     """Wrapper for torchgeo ResNet models (resnet18 / resnet50 / resnet152).
 
@@ -93,6 +95,7 @@ class TorchGeoResNetBench(BenchModel):
     def forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Return headless ResNet embeddings of shape ``(B, K)``."""
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -101,6 +104,7 @@ class TorchGeoResNetBench(BenchModel):
 # ---------------------------------------------------------------------------
 # Swin V2 (torchvision backbone loaded via torchgeo)
 # ---------------------------------------------------------------------------
+
 
 class TorchGeoSwinBench(BenchModel):
     """Wrapper for torchgeo Swin-V2 models (swin_v2_b / swin_v2_t).
@@ -130,6 +134,7 @@ class TorchGeoSwinBench(BenchModel):
     def forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Return headless Swin-V2 embeddings of shape ``(B, K)``."""
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
@@ -138,6 +143,7 @@ class TorchGeoSwinBench(BenchModel):
 # ---------------------------------------------------------------------------
 # ScaleMAE (ViT backbone)
 # ---------------------------------------------------------------------------
+
 
 class TorchGeoScaleMAEBench(BenchModel):
     """Wrapper for torchgeo ScaleMAE-Large.
@@ -166,6 +172,7 @@ class TorchGeoScaleMAEBench(BenchModel):
     def forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Return mean-pooled spatial tokens of shape ``(B, D)``."""
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         tokens = self.backbone.forward_features(images)  # (B, N+1, D)
@@ -176,6 +183,7 @@ class TorchGeoScaleMAEBench(BenchModel):
 # ---------------------------------------------------------------------------
 # DOFA (band-agnostic ViT requiring wavelength input)
 # ---------------------------------------------------------------------------
+
 
 class TorchGeoDOFABench(BenchModel):
     """Wrapper for torchgeo DOFA models (dofa_base / dofa_large).
@@ -209,6 +217,7 @@ class TorchGeoDOFABench(BenchModel):
     def forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Return DOFA feature embeddings of shape ``(B, D)``."""
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone.forward_features(images, wavelengths=self.wavelengths)
@@ -217,6 +226,7 @@ class TorchGeoDOFABench(BenchModel):
 # ---------------------------------------------------------------------------
 # EarthLoc (place-recognition descriptor)
 # ---------------------------------------------------------------------------
+
 
 class TorchGeoEarthLocBench(BenchModel):
     """Wrapper for torchgeo EarthLoc.
@@ -244,6 +254,7 @@ class TorchGeoEarthLocBench(BenchModel):
     def forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
+        """Return EarthLoc global descriptor of shape ``(B, 4096)``."""
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)

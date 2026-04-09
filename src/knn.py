@@ -76,6 +76,7 @@ class KNNClassifier:
 
     @property
     def multi_label(self) -> bool:
+        """Whether the classifier is in multi-label mode."""
         return self._multi_label
 
     def _search(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

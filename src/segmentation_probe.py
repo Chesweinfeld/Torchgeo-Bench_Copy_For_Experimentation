@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 class SegmentationProbe(nn.Module):
+    """Multi-scale segmentation probe that hooks into backbone feature layers."""
+
     def __init__(
         self,
         backbone: nn.Module,
@@ -89,7 +91,9 @@ class SegmentationProbe(nn.Module):
         )
 
     def _hook_fn(self, name: str):
-        def hook(module, input, output):
+        """Return a forward hook that captures the output of the named layer."""
+
+        def hook(module, input, output):  # noqa: ARG001
             self._features[name] = output
 
         return hook
@@ -130,6 +134,14 @@ class SegmentationProbe(nn.Module):
         return feat
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute segmentation logits from input images.
+
+        Args:
+            x: Input tensor of shape ``(B, C, H, W)``.
+
+        Returns:
+            Logits tensor of shape ``(B, num_classes, H, W)``.
+        """
         input_h, input_w = x.shape[-2:]
 
         if self.freeze_backbone:

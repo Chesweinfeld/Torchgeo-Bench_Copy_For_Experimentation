@@ -138,7 +138,7 @@ def _get_datasets_v2(
         raise ValueError(f"Could not find V2 dataset class '{class_name}' in geobench_v2.datasets.")
 
     # currently only support mean-stdev normalization for V2, which happens by default
-    def load_split(split):
+    def load_split(split: str) -> gb_v2.GeoBenchBaseDataset:
         ds = dataset_cls(
             root=os.path.join(root, dataset_name),
             split=split,
@@ -189,8 +189,7 @@ def _get_datasets_v1(
     transform: Callable | None,
     normalize_arg: bool | str,
 ):
-    """Handles loading logic for V1 datasets."""
-
+    """Handle loading logic for V1 datasets."""
     train_dataset = GeoBenchDataset(
         root=root,
         dataset_name=dataset_name,
@@ -263,12 +262,27 @@ def get_datasets(
     """Load GeoBench dataset splits and dataloaders (supports V1 and V2).
 
     Args:
+        dataset_name: Name of the dataset (e.g., ``"m-eurosat"``).
+        partition_name: Partition name (e.g., ``"default"``, ``"0.01x_train"``).
+        batch_size: Batch size for the dataloaders.
+        normalization: Normalization strategy (``"mean_stdev"``, ``"min_max"``,
+            ``"percentile_2_98"``).
+        return_val: If True, also return a validation dataloader.
+        only_return_datasets: If True, return raw Dataset objects instead of
+            DataLoaders.
+        geobench_root: Root directory for V1 data. Defaults to ``GEOBENCH_ROOT``
+            env var.
+        geobench_v2_root: Root directory for V2 data. Defaults to
+            ``GEOBENCH_V2_ROOT`` env var.
+        num_workers: Number of dataloader worker processes.
+        image_size: If set, resize images to this square size.
+        interpolation: Interpolation mode for resizing (``"bicubic"``,
+            ``"bilinear"``, ``"nearest"``).
         bands: Band selection. Options:
-            - "rgb" (default): Load red, green, blue bands only
-            - "all" or None: Load all available bands (multispectral)
-            - tuple of band names: e.g., ("red", "green", "blue", "nir")
+            - ``"rgb"`` (default): Load red, green, blue bands only.
+            - ``"all"`` or None: Load all available bands (multispectral).
+            - tuple of band names: e.g., ``("red", "green", "blue", "nir")``.
     """
-
     if geobench_root is None:
         geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
 

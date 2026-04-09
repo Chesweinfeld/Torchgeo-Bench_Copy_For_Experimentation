@@ -69,6 +69,14 @@ class SegmentationSolver:
         epochs: int = 5,
         verbose: bool = True,
     ) -> None:
+        """Train the segmentation probe.
+
+        Args:
+            train_loader: Training data loader.
+            val_loader: Optional validation data loader for per-epoch mIoU logging.
+            epochs: Number of training epochs.
+            verbose: Whether to show progress bars and epoch logs.
+        """
         for epoch in range(epochs):
             self.model.train()
             if self.model.freeze_backbone:
@@ -104,6 +112,14 @@ class SegmentationSolver:
 
     @torch.no_grad()
     def evaluate(self, dataloader: DataLoader) -> float:
+        """Evaluate the model on a dataloader and return mean IoU.
+
+        Args:
+            dataloader: Evaluation data loader.
+
+        Returns:
+            Mean Intersection-over-Union (mIoU) score.
+        """
         self.model.eval()
         self.metric.reset()
 

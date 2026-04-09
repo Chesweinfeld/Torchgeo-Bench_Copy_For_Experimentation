@@ -223,7 +223,9 @@ class GeoBenchDataset(Dataset):
 
                 # Use restricted unpickler to get basic dict structure
                 class RestrictedUnpickler(pickle.Unpickler):
-                    def find_class(self, module, name):  # type: ignore[override]
+                    """Unpickler that stubs out geobench module classes."""
+
+                    def find_class(self, module: str, name: str) -> type:  # type: ignore[override]
                         # Allow basic types and geobench classes (will become stubs)
                         if module == "geobench.dataset":
                             # Return a dummy class that can be instantiated

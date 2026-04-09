@@ -1,3 +1,5 @@
+"""Benchmark model implementations and exports."""
+
 from .bench_models import ImageStatsBench, RCFBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
