@@ -15,5 +15,6 @@ dependencies:
       - timm>=0.9.0
       - huggingface_hub>=0.20.0
       - torchgeo>=0.8.0
-      - faissknn>=0.0.2
+      - faiss-gpu>=1.7.0
+      - geobench_v2
       - -e .

@@ -1,9 +1,9 @@
+"""Logistic regression (single-label and multi-label) with PyTorch optimizers."""
+
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import torch
@@ -20,17 +20,22 @@ class _TrainStats:
 
 
 class LogisticRegression:
-    """
-    Multinomial logistic regression with identical objective scaling to sklearn:
+    """Logistic regression with identical objective scaling to sklearn.
+
+    Supports both single-label (softmax cross-entropy) and multi-label
+    (sigmoid BCE) classification via the ``multi_label`` flag.
+
+    Objective::
 
         loss = (1/n) * CrossEntropy + (1/n) * 0.5/C * ||W||^2
 
-        Differences from the previous version (speed-oriented but same math):
-            - LBFGS uses its internal iteration loop (one external .step).
-            - Adam uses on-device manual batching (no DataLoader overhead).
-            - Inference paths use torch.inference_mode.
-            - Optional TF32 for CUDA matmul (single linear layer still benefits slightly).
-            - Coefficients and intercept are exposed via properties (no copying at fit time).
+    Differences from the previous version (speed-oriented but same math):
+
+    - LBFGS uses its internal iteration loop (one external ``.step``).
+    - Adam uses on-device manual batching (no DataLoader overhead).
+    - Inference paths use ``torch.inference_mode``.
+    - Optional TF32 for CUDA matmul (single linear layer still benefits slightly).
+    - Coefficients and intercept are exposed via properties (no copying at fit time).
 
     Args match previous class unless noted.
     """
@@ -48,6 +53,7 @@ class LogisticRegression:
         device: str | torch.device | None = None,
         verbose: bool = False,
         use_tf32: bool = True,  # enable TF32 on CUDA for speed
+        multi_label: bool = False,
     ) -> None:
         if C <= 0:
             raise ValueError("C must be > 0.")
@@ -69,6 +75,7 @@ class LogisticRegression:
         self.device = requested_device
         self.verbose = verbose
         self.use_tf32 = use_tf32
+        self.multi_label = multi_label
 
         # Will be set during fit
         self._fitted = False
@@ -94,40 +101,73 @@ class LogisticRegression:
         self._model = model
 
     def fit(self, X: Tensor, y: Tensor) -> LogisticRegression:
+        """Fit the logistic regression model on training data.
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+            y: Labels — ``(n_samples,)`` for single-label or
+               ``(n_samples, n_classes)`` for multi-label.
+
+        Returns:
+            Self, for method chaining.
+
+        Raises:
+            TypeError: If X or y is not a torch.Tensor.
+            ValueError: If shapes are invalid or data is empty.
+        """
         if not torch.is_tensor(X):
             raise TypeError("X must be a torch.Tensor")
         if not torch.is_tensor(y):
             raise TypeError("y must be a torch.Tensor")
         if X.ndim != 2:
             raise ValueError(f"X must be 2D (n_samples, n_features); got shape {tuple(X.shape)}")
-        if y.ndim != 1:
-            raise ValueError(f"y must be 1D (n_samples,); got shape {tuple(y.shape)}")
+        if self.multi_label:
+            if y.ndim != 2:
+                raise ValueError(
+                    f"Multi-label: y must be 2D (n_samples, n_classes); got {tuple(y.shape)}"
+                )
+        else:
+            if y.ndim != 1:
+                raise ValueError(f"y must be 1D (n_samples,); got shape {tuple(y.shape)}")
 
         # Move once, keep contiguous
         X_tensor = X.to(self.device, dtype=torch.float32, non_blocking=True).contiguous()
-        y_tensor = y.to(self.device, dtype=torch.long, non_blocking=True).contiguous()
 
         n_samples, n_features = X_tensor.shape
         if n_samples == 0:
             raise ValueError("Empty training data.")
+
+        if self.multi_label:
+            y_tensor = y.to(self.device, dtype=torch.float32, non_blocking=True).contiguous()
+            n_classes = y_tensor.shape[1]
+            self.classes_ = np.arange(n_classes)
+        else:
+            y_tensor = y.to(self.device, dtype=torch.long, non_blocking=True).contiguous()
+            # Encode classes to 0..K-1 and keep mapping
+            unique_classes, y_inv = torch.unique(y_tensor, sorted=True, return_inverse=True)
+            self.classes_ = unique_classes.detach().cpu().numpy()
+            y_tensor = y_inv  # already long on device
+            n_classes = unique_classes.numel()
+
         if n_samples != y_tensor.shape[0]:
             raise ValueError("X and y length mismatch.")
-
-        # Encode classes to 0..K-1 and keep mapping
-        unique_classes, y_inv = torch.unique(y_tensor, sorted=True, return_inverse=True)
-        self.classes_ = unique_classes.detach().cpu().numpy()
-        y_tensor = y_inv  # already long on device
-        n_classes = unique_classes.numel()
 
         self._build_model(n_features, n_classes)
         assert self._model is not None
         model = self._model
 
-        criterion = torch.nn.CrossEntropyLoss(reduction="mean")
+        if self.multi_label:
+            criterion = torch.nn.BCEWithLogitsLoss(reduction="mean")
+        else:
+            criterion = torch.nn.CrossEntropyLoss(reduction="mean")
         losses: list[float] = []
 
-        # Regularization factor matches sklearn scaling exactly
-        reg = 0.5 * (1.0 / self.C) / float(n_samples)
+        # Regularization factor matches sklearn scaling exactly.
+        # BCE mean divides by (n_samples * n_classes), so scale reg to match.
+        if self.multi_label:
+            reg = 0.5 * (1.0 / self.C) / float(n_samples * n_classes)
+        else:
+            reg = 0.5 * (1.0 / self.C) / float(n_samples)
 
         if self.solver == "lbfgs":
             # Single .step with LBFGS internal loop -> far less Python overhead
@@ -213,6 +253,7 @@ class LogisticRegression:
 
     @property
     def coef_(self) -> np.ndarray:
+        """Return learned weight matrix as a NumPy array of shape ``(n_classes, n_features)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing coef_.")
         with torch.inference_mode():
@@ -220,18 +261,37 @@ class LogisticRegression:
 
     @property
     def intercept_(self) -> np.ndarray:
+        """Return learned bias vector as a NumPy array of shape ``(n_classes,)``."""
         if not self._fitted or self._model is None:
             raise AttributeError("Model not fitted; call fit() before accessing intercept_.")
         with torch.inference_mode():
             return self._model.bias.detach().cpu().numpy()
 
     def predict(self, X: Tensor) -> np.ndarray:
+        """Predict class labels (single-label) or binary indicators (multi-label).
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Predicted labels as a NumPy array.
+        """
         probs = self.predict_proba(X)
+        if self.multi_label:
+            return (probs > 0.5).astype(np.int32)
         idx = probs.argmax(axis=1)
         assert self.classes_ is not None
         return self.classes_[idx]
 
     def predict_proba(self, X: Tensor) -> np.ndarray:
+        """Predict per-class probabilities.
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Probability matrix of shape ``(n_samples, n_classes)``.
+        """
         if not self._fitted or self._model is None or self.classes_ is None:
             raise RuntimeError("Model has not been fit yet.")
         if not torch.is_tensor(X):
@@ -242,10 +302,21 @@ class LogisticRegression:
         self._model.eval()
         with torch.inference_mode():
             logits = self._model(X_tensor)
-            probs = torch.softmax(logits, dim=1).detach().cpu().numpy()
+            if self.multi_label:
+                probs = torch.sigmoid(logits).detach().cpu().numpy()
+            else:
+                probs = torch.softmax(logits, dim=1).detach().cpu().numpy()
         return probs
 
     def decision_function(self, X: Tensor) -> np.ndarray:
+        """Compute raw logits (decision function values).
+
+        Args:
+            X: Feature matrix of shape ``(n_samples, n_features)``.
+
+        Returns:
+            Logits array of shape ``(n_samples, n_classes)``.
+        """
         if not self._fitted or self._model is None:
             raise RuntimeError("Model has not been fit yet.")
         if not torch.is_tensor(X):
@@ -264,6 +335,6 @@ class LogisticRegression:
             f"C={self.C}, max_iter={self.max_iter}, lr={self.lr}, "
             f"batch_size={self.batch_size}, tol={self.tol}, patience={self.patience}, "
             f"random_state={self.random_state}, device='{self.device}', fitted={self._fitted}, "
-            f"use_tf32={self.use_tf32}"
+            f"use_tf32={self.use_tf32}, multi_label={self.multi_label}"
             ")"
         )

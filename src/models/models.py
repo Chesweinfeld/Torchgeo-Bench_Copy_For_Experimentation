@@ -1,3 +1,5 @@
+"""Random Convolutional Features (RCF) model for the MOSAIKS method."""
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -58,6 +60,7 @@ class RCF(nn.Module):
             bias: bias of the convolutional layer
             seed: random seed used to initialize the convolutional layer
             mode: "empirical" or "gaussian"
+            stats_mode: "mean", "stdev", or "all" — controls pooling statistics
             dataset: a NonGeoDataset to sample from when mode is "empirical"
         """
         super().__init__()

@@ -1,9 +1,30 @@
+"""Feature extraction utilities for model benchmarking."""
+
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 
-def extract_features(model, dataloader, device, transforms=None, verbose=True):
+def extract_features(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    device: str | torch.device,
+    transforms: object | None = None,
+    verbose: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract feature embeddings and labels from a dataloader.
+
+    Args:
+        model: Model to use for feature extraction.
+        dataloader: DataLoader yielding dicts with ``"image"`` and ``"label"`` keys.
+        device: Device to run inference on.
+        transforms: Optional transform applied to images before the model.
+        verbose: Whether to display a progress bar.
+
+    Returns:
+        Tuple of (features, labels) as NumPy arrays.
+    """
     x_all = []
     y_all = []
 
@@ -50,7 +71,25 @@ def extract_features(model, dataloader, device, transforms=None, verbose=True):
     return x_all, y_all
 
 
-def extract_features_transformers(model, dataloader, device, processor=None, verbose=True):
+def extract_features_transformers(
+    model: torch.nn.Module,
+    dataloader: DataLoader,
+    device: str | torch.device,
+    processor: object,
+    verbose: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract features using a HuggingFace-style model with a processor.
+
+    Args:
+        model: Transformer model for feature extraction.
+        dataloader: DataLoader yielding dicts with ``"image"`` and ``"label"`` keys.
+        device: Device to run inference on.
+        processor: Preprocessing callable applied to images before the model.
+        verbose: Whether to display a progress bar.
+
+    Returns:
+        Tuple of (features, labels) as NumPy arrays.
+    """
     x_all = []
     y_all = []
 
@@ -62,19 +101,10 @@ def extract_features_transformers(model, dataloader, device, processor=None, ver
         images = batch["image"].to(device)
         labels = batch["label"].numpy()
 
-        # images = processor(images=images, return_tensors="pt")
-
         images = processor(images)
-        # images = {'pixel_values': images}
-        with torch.no_grad():
-            with torch.inference_mode():
-                # features = model(**images)
-                features = model(images)
+        with torch.no_grad(), torch.inference_mode():
+            features = model(images)
 
-        # last_hidden_states = features.last_hidden_state
-        # cls_token = last_hidden_states[:, 0, :]
-
-        # x_all.append(cls_token.cpu().numpy())
         x_all.append(features.cpu().numpy())
         y_all.append(labels)
 

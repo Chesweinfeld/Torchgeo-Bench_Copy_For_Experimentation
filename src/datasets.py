@@ -6,21 +6,14 @@ the V1 GeoBenchDataset class and the V2 geobench_v2 package.
 
 import os
 import warnings
-from typing import Callable, Optional, Tuple, Union
+from collections.abc import Callable
 
+import geobench_v2.datasets as gb_v2
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .geobench_dataset import GeoBenchDataset
-
-try:
-    import geobench_v2.datasets as gb_v2
-
-    HAS_V2 = True
-except ImportError:
-    HAS_V2 = False
-
 
 NUM_CLASSES_PER_DATASET = {
     "m-forestnet": 12,
@@ -28,7 +21,7 @@ NUM_CLASSES_PER_DATASET = {
     "m-pv4ger": 2,
     "m-brick-kiln": 2,
     "m-so2sat": 17,
-    # "m-bigearthnet": None,  # TODO: Handle BigEarthNet separately
+    "m-bigearthnet": 43,
     "benv2": 19,
     "treesatai": 13,
     "so2sat": 17,
@@ -129,15 +122,10 @@ def _get_datasets_v2(
     root: str,
     num_workers: int,
     bands: tuple[str, ...] | None,
-    transform: Optional[Callable],
+    transform: Callable | None,
     normalization: str,
 ):
     """Handles loading logic for V2 datasets."""
-    if not HAS_V2:
-        raise ImportError(
-            f"Cannot load V2 dataset '{dataset_name}': geobench_v2 package not found."
-        )
-
     if partition_name != "default":
         warnings.warn(
             f"Partitions are not supported in GeoBench V2. Ignoring partition '{partition_name}'.",
@@ -150,7 +138,7 @@ def _get_datasets_v2(
         raise ValueError(f"Could not find V2 dataset class '{class_name}' in geobench_v2.datasets.")
 
     # currently only support mean-stdev normalization for V2, which happens by default
-    def load_split(split):
+    def load_split(split: str) -> gb_v2.GeoBenchBaseDataset:
         ds = dataset_cls(
             root=os.path.join(root, dataset_name),
             split=split,
@@ -198,11 +186,10 @@ def _get_datasets_v1(
     root: str,
     num_workers: int,
     bands: tuple[str, ...] | None,
-    transform: Optional[Callable],
-    normalize_arg: Union[bool, str],
+    transform: Callable | None,
+    normalize_arg: bool | str,
 ):
-    """Handles loading logic for V1 datasets."""
-
+    """Handle loading logic for V1 datasets."""
     train_dataset = GeoBenchDataset(
         root=root,
         dataset_name=dataset_name,
@@ -275,12 +262,27 @@ def get_datasets(
     """Load GeoBench dataset splits and dataloaders (supports V1 and V2).
 
     Args:
+        dataset_name: Name of the dataset (e.g., ``"m-eurosat"``).
+        partition_name: Partition name (e.g., ``"default"``, ``"0.01x_train"``).
+        batch_size: Batch size for the dataloaders.
+        normalization: Normalization strategy (``"mean_stdev"``, ``"min_max"``,
+            ``"percentile_2_98"``).
+        return_val: If True, also return a validation dataloader.
+        only_return_datasets: If True, return raw Dataset objects instead of
+            DataLoaders.
+        geobench_root: Root directory for V1 data. Defaults to ``GEOBENCH_ROOT``
+            env var.
+        geobench_v2_root: Root directory for V2 data. Defaults to
+            ``GEOBENCH_V2_ROOT`` env var.
+        num_workers: Number of dataloader worker processes.
+        image_size: If set, resize images to this square size.
+        interpolation: Interpolation mode for resizing (``"bicubic"``,
+            ``"bilinear"``, ``"nearest"``).
         bands: Band selection. Options:
-            - "rgb" (default): Load red, green, blue bands only
-            - "all" or None: Load all available bands (multispectral)
-            - tuple of band names: e.g., ("red", "green", "blue", "nir")
+            - ``"rgb"`` (default): Load red, green, blue bands only.
+            - ``"all"`` or None: Load all available bands (multispectral).
+            - tuple of band names: e.g., ``("red", "green", "blue", "nir")``.
     """
-
     if geobench_root is None:
         geobench_root = os.getenv("GEOBENCH_ROOT", DEFAULT_GEOBENCH_ROOT)
 
@@ -337,13 +339,17 @@ def get_datasets(
     elif bands == "all" or bands is None:
         bands_tuple = None  # None means load all available bands
     elif isinstance(bands, str):
-        raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+        raise ValueError(
+            f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names."
+        )
     else:
         # Handle list, tuple, or OmegaConf ListConfig
         try:
             bands_tuple = tuple(bands)  # type: ignore[arg-type]
         except TypeError:
-            raise ValueError(f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names.")
+            raise ValueError(
+                f"Invalid bands parameter: {bands}. Use 'rgb', 'all', None, or list of band names."
+            )
 
     if dataset_name in V2_DATASETS:
         return _get_datasets_v2(

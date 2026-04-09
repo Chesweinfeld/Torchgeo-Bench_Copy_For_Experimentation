@@ -1,40 +1,37 @@
-from __future__ import annotations
+"""Timm backbone wrapper for patch-level feature extraction."""
 
-from typing import Optional
+from __future__ import annotations
 
 import timm
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from .interface import BenchModel
 
 
 class TimmPatchBenchModel(BenchModel):
-    """
-    BenchModel wrapper for any timm backbone that returns a single vector embedding (B, K).
+    """BenchModel wrapper for any timm backbone that returns a single vector embedding ``(B, K)``.
 
     Key ideas:
-      - Use timm's `num_classes=0` (headless) to get pooled features out of `forward()`.
-      - A small projection head is added optionally to force a target embedding size (K).
-      - Robust to CNNs and ViTs: if a model still returns tokens or spatial maps,
-        we reduce to (B, C) safely.
 
-    Args
-    ----
-    model_name : str
-        Any timm model name (e.g., "resnet50", "convnext_small",
-        "vit_base_patch16_224", "swin_base_patch4_window7_224", ...).
-    num_channels : int
-        Number of input channels (passed as `in_chans`).
-    pretrained : bool
-        Load pretrained weights when available.
-    normalize : bool
-        If True, L2-normalize the output embedding.
-    global_pool : Optional[str]
-        Global pooling strategy for timm headless models.
-        Common values: "avg" (default for CNNs), "token"/"avg" for ViTs.
-        If None, uses the model's default.
+    - Use timm's ``num_classes=0`` (headless) to get pooled features out of ``forward()``.
+    - A small projection head is added optionally to force a target embedding size (K).
+    - Robust to CNNs and ViTs: if a model still returns tokens or spatial maps,
+      we reduce to ``(B, C)`` safely.
+
+    Args:
+        model_name: Any timm model name (e.g., ``"resnet50"``, ``"convnext_small"``,
+            ``"vit_base_patch16_224"``, ``"swin_base_patch4_window7_224"``).
+        num_channels: Number of input channels (passed as ``in_chans``).
+        pretrained: Load pretrained weights when available.
+        normalize: If True, L2-normalize the output embedding.
+        global_pool: Global pooling strategy for timm headless models.
+            Common values: ``"avg"`` (default for CNNs), ``"token"``/``"avg"`` for ViTs.
+            If None, uses the model's default. Overridden to ``""`` when
+            ``use_cls_token=True``.
+        use_cls_token: If True, use the CLS token representation instead of averaging
+            spatial tokens. Only applies to ViT/DeiT models that have a CLS token.
+            Automatically disables timm's internal pooling so raw tokens are returned.
     """
 
     def __init__(
@@ -44,9 +41,10 @@ class TimmPatchBenchModel(BenchModel):
         *,
         pretrained: bool = True,
         normalize: bool = False,
-        global_pool: Optional[str] = "avg",
+        global_pool: str | None = "avg",
         auto_resize: bool = False,
-        target_size: Optional[int] = None,
+        target_size: int | None = None,
+        use_cls_token: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
@@ -55,6 +53,11 @@ class TimmPatchBenchModel(BenchModel):
         self.pretrained = pretrained
         self.normalize = normalize
         self.auto_resize = auto_resize
+        self.use_cls_token = use_cls_token
+
+        # When using CLS token, disable timm's internal pooling so we get raw tokens
+        if self.use_cls_token and global_pool != "":
+            global_pool = ""
 
         # Create a headless backbone that returns pooled features from forward()
         # (timm convention with num_classes=0)
@@ -70,7 +73,7 @@ class TimmPatchBenchModel(BenchModel):
         # timm default_cfg has key 'input_size' like (3, 224, 224)
         default_cfg = getattr(self.backbone, "default_cfg", {}) or {}
         cfg_input_size = default_cfg.get("input_size", None)
-        inferred_size: Optional[int] = None
+        inferred_size: int | None = None
         if isinstance(cfg_input_size, (list, tuple)) and len(cfg_input_size) == 3:
             # (C, H, W)
             inferred_size = int(cfg_input_size[1])
@@ -93,6 +96,11 @@ class TimmPatchBenchModel(BenchModel):
         images: torch.Tensor,
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Return pooled patch embeddings of shape ``(B, K)``.
+
+        Optionally resizes inputs to the backbone's expected resolution when
+        ``auto_resize`` is enabled.
+        """
         # Optionally resize to backbone's expected resolution. We assume square size.
         if self.auto_resize and self.target_size is not None:
             h, w = images.shape[-2], images.shape[-1]
@@ -111,9 +119,12 @@ class TimmPatchBenchModel(BenchModel):
             # (B, C, h, w) -> (B, C)
             x = F.adaptive_avg_pool2d(x, 1).flatten(1)
         elif x.ndim == 3:
-            # (B, N, C) tokens -> drop cls if present and average tokens
-            # If N==1, this is already pooled.
-            if x.shape[1] > 1:
+            # (B, N, C) tokens
+            if self.use_cls_token and self._has_cls_token_like():
+                # Use the CLS token (first token)
+                x = x[:, 0, :]
+            elif x.shape[1] > 1:
+                # Average spatial tokens, optionally dropping CLS
                 x = x[:, 1:, :] if self._has_cls_token_like() else x
                 x = x.mean(dim=1)
             else:
@@ -129,6 +140,7 @@ class TimmPatchBenchModel(BenchModel):
         images: torch.Tensor,
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Not implemented for TimmPatchBenchModel."""
         raise NotImplementedError("Pixel features are not supported in TimmPatchBenchModel.")
 
     # ---- helpers ----

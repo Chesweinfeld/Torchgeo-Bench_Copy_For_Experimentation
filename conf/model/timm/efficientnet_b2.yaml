@@ -1,0 +1,12 @@
+# EfficientNet-B2 (9M params)
+# Feature dimension: 1408
+# Model: efficientnet_b2
+
+_target_: src.models.TimmPatchBenchModel
+num_channels: 3
+model_name: efficientnet_b2
+pretrained: true
+global_pool: avg
+seed: null
+name: efficientnet_b2
+auto_resize: true

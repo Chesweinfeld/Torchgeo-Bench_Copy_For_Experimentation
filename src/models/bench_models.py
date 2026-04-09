@@ -1,4 +1,7 @@
+"""Lightweight benchmark model wrappers (RCF and ImageStats)."""
+
 import torch
+from torchgeo.datasets import NonGeoDataset
 
 from .interface import BenchModel
 from .models import RCF
@@ -18,7 +21,7 @@ class RCFBench(BenchModel):
         mode: str = "gaussian",
         stats_mode: str = "mean",
         seed: int | None = None,
-        dataset=None,
+        dataset: NonGeoDataset | None = None,
         **kwargs,
     ) -> None:
         super().__init__(num_channels=num_channels)
@@ -37,6 +40,7 @@ class RCFBench(BenchModel):
         images: torch.Tensor,
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Return RCF embeddings for a batch of images."""
         return self.rcf(images)
 
 
@@ -51,6 +55,7 @@ class ImageStatsBench(BenchModel):
         images: torch.Tensor,
         bboxes: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Return per-channel image statistics (mean, std, max, min) as features."""
         # images: (B, C, H, W)
         feats = torch.cat(
             [

@@ -41,7 +41,7 @@ class MockV2Dataset:
 
 @pytest.fixture
 def mock_v2_env():
-    with patch("src.datasets.HAS_V2", True), patch("src.datasets.gb_v2") as mock_pkg:
+    with patch("src.datasets.gb_v2") as mock_pkg:
         # Side_effect ensures we get fresh instances
         mock_pkg.GeoBenchBENV2 = MagicMock(side_effect=MockV2Dataset)
         mock_pkg.GeoBenchBiomassters = MagicMock(side_effect=MockV2Dataset)
@@ -107,12 +107,6 @@ class TestV2Loading:
         dl = DataLoader(ds, batch_size=1)
         batch = next(iter(dl))
         assert batch["image"].shape[-1] == target
-
-    def test_missing_pkg_error(self):
-        with patch("src.datasets.HAS_V2", False):
-            # Matches strict string in src/datasets.py
-            with pytest.raises(ImportError, match="geobench_v2 package not found"):
-                get_datasets(dataset_name="benv2")
 
     def test_bad_dataset_name(self, mock_v2_env):
         mock_v2_env.GeoBenchPhantomDataset = None

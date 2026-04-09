@@ -43,7 +43,8 @@ dependencies = [
     "timm>=0.9.0",
     "huggingface_hub>=0.20.0",
     "torchgeo>=0.8.0",
-    "faissknn>=0.0.2",
+    "faiss-gpu>=1.7.0",
+    "geobench_v2",
 ]
 
 [project.optional-dependencies]
@@ -52,14 +53,11 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.0.270",
 ]
-acceleration = [
-    "scikit-learn-intelex>=2023.1.0",  # Intel optimization
-]
-geobench = [
-    "geobench>=0.1.0",  # Original geobench library (optional alternative)
+olmoearth = [
+    "olmoearth-pretrain-minimal>=0.0.2",
 ]
 all = [
-    "torchgeo-bench[dev,acceleration,geobench]",
+    "torchgeo-bench[dev,acceleration]",
 ]
 
 [project.urls]
@@ -90,12 +88,17 @@ lint.select = [
     "UP",   # pyupgrade
     "ARG",  # flake8-unused-arguments
     "SIM",  # flake8-simplify
+    "D",    # pydocstyle
 ]
 lint.ignore = [
     "E501",  # line too long (handled by ruff format)
     "B008",  # do not perform function calls in argument defaults
     "B905",  # zip() without an explicit strict= parameter
+    "D104",  # missing docstring in public package
+    "D105",  # missing docstring in magic method
+    "D107",  # missing docstring in __init__ (documented in class docstring)
 ]
+lint.pydocstyle.convention = "google"
 exclude = [
     ".git",
     ".mypy_cache",
@@ -106,6 +109,11 @@ exclude = [
     "dist",
     "outputs",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D"]
+"scripts/**/*.py" = ["D"]
+"src/features.py" = ["D100"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
