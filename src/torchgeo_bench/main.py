@@ -17,7 +17,8 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from torchgeo_bench.datasets import NUM_CLASSES_PER_DATASET, get_datasets, is_dataset_available
+from torchgeo_bench.dataset_info import list_available_datasets, load_dataset_info
+from torchgeo_bench.datasets import get_datasets, is_dataset_available
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
@@ -32,8 +33,6 @@ logger = logging.getLogger(__name__)
 # Utilities
 # ---------------------------------------------------------------------------
 
-MULTILABEL_DATASETS = {"m-bigearthnet"}
-
 
 def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
     """Expand dataset names to a flat list.
@@ -46,7 +45,7 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
     """
     if isinstance(names, str):
         if names == "all":
-            return list(NUM_CLASSES_PER_DATASET.keys())
+            return list_available_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
 
@@ -424,6 +423,21 @@ def main(cfg: DictConfig) -> None:
     normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
+        # Load dataset metadata from config
+        try:
+            ds_info = load_dataset_info(ds_name)
+        except FileNotFoundError:
+            logger.warning(f"Skipping dataset {ds_name} (no config file found)")
+            continue
+
+        if not is_dataset_available(
+            ds_name,
+            geobench_root=getattr(cfg.dataset, "geobench_root", None),
+            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
+        ):
+            logger.warning(f"Skipping dataset {ds_name} (data not found on disk)")
+            continue
+
         # Check if we can skip this dataset entirely
         # Include dataset config params to ensure we only skip with matching settings
         config_tuple = (
@@ -439,14 +453,6 @@ def main(cfg: DictConfig) -> None:
 
         seg_method = f"seg-{cfg.eval.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
-
-        if not is_dataset_available(
-            ds_name,
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-        ):
-            logger.warning(f"Skipping dataset {ds_name} (data not found on disk)")
-            continue
 
         result = get_datasets(
             dataset_name=ds_name,
@@ -465,12 +471,11 @@ def main(cfg: DictConfig) -> None:
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
-        # check if we have classification or segmentation
-        first_sample = train_dataset[0]
-        num_channels = first_sample["image"].shape[0]
-        is_segmentation = "mask" in first_sample
-        is_multilabel = ds_name in MULTILABEL_DATASETS
-        num_classes = NUM_CLASSES_PER_DATASET.get(ds_name, 0)
+        # Use metadata from dataset config
+        num_channels = train_dataset[0]["image"].shape[0]
+        is_segmentation = ds_info.task == "segmentation"
+        is_multilabel = ds_info.multilabel
+        num_classes = ds_info.num_classes
 
         # Resume check for segmentation
         if is_segmentation and cfg.resume and seg_key in completed_runs:
@@ -509,7 +514,7 @@ def main(cfg: DictConfig) -> None:
             "seed": cfg.seed,
             "model": cfg.model._target_,
             "name": cfg.model.name,
-            "normalization": cfg.dataset.normalization,
+            "normalization": normalization,
             "image_size": getattr(cfg.dataset, "image_size", None),
             "interpolation": getattr(cfg.dataset, "interpolation", "bicubic"),
             "partition": cfg.dataset.partition,
