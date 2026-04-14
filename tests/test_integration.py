@@ -219,3 +219,126 @@ class TestMultiDatasetRun:
         datasets = set(df["dataset"])
         assert datasets == {"m-eurosat", "m-forestnet"}, f"Got datasets: {datasets}"
         assert len(df) == 2  # 1 knn row per dataset
+
+
+# ---------------------------------------------------------------------------
+# Additional model baselines (full default partition)
+# ---------------------------------------------------------------------------
+
+# Expected performance from results/all_results_old.csv (default partition).
+# Bounds are set well below observed values to be robust to minor changes.
+#
+# model                  | m-eurosat knn | m-eurosat linear | m-forestnet knn | m-forestnet linear
+# rcf                    | 0.575         | 0.586            | 0.228           | 0.428
+# imagestats             | 0.597         | 0.718            | 0.212           | 0.338
+# mobilenetv3_small_100  | 0.815         | 0.933            | 0.356           | 0.503
+
+
+@pytest.mark.slow
+@_skip_no_v1
+class TestRCFBaseline:
+    """RCF (random convolutional features) — fastest model, no downloads."""
+
+    @pytest.fixture(autouse=True)
+    def _output_csv(self, tmp_path):
+        self.output = str(tmp_path / "rcf_results.csv")
+
+    def test_eurosat(self):
+        """RCF on m-eurosat default partition."""
+        result = _run_bench(
+            "model=rcf",
+            "dataset.names=[m-eurosat]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn > 0.40, f"RCF KNN on m-eurosat too low: {knn}"
+        assert linear > 0.40, f"RCF linear on m-eurosat too low: {linear}"
+
+    def test_forestnet(self):
+        """RCF on m-forestnet default partition."""
+        result = _run_bench(
+            "model=rcf",
+            "dataset.names=[m-forestnet]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn > 0.12, f"RCF KNN on m-forestnet too low: {knn}"
+        assert linear > 0.25, f"RCF linear on m-forestnet too low: {linear}"
+
+
+@pytest.mark.slow
+@_skip_no_v1
+class TestImageStatsBaseline:
+    """ImageStats — trivial per-channel statistics baseline."""
+
+    @pytest.fixture(autouse=True)
+    def _output_csv(self, tmp_path):
+        self.output = str(tmp_path / "imagestats_results.csv")
+
+    def test_eurosat(self):
+        """ImageStats on m-eurosat default partition."""
+        result = _run_bench(
+            "model=imagestats",
+            "dataset.names=[m-eurosat]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn > 0.40, f"ImageStats KNN on m-eurosat too low: {knn}"
+        assert linear > 0.50, f"ImageStats linear on m-eurosat too low: {linear}"
+
+
+@pytest.mark.slow
+@_skip_no_v1
+class TestMobileNetV3Baseline:
+    """MobileNetV3-Small — small pretrained CNN."""
+
+    @pytest.fixture(autouse=True)
+    def _output_csv(self, tmp_path):
+        self.output = str(tmp_path / "mobilenet_results.csv")
+
+    def test_eurosat(self):
+        """MobileNetV3-Small on m-eurosat default partition."""
+        result = _run_bench(
+            "model=timm/mobilenetv3_small_100",
+            "dataset.names=[m-eurosat]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn > 0.65, f"MobileNetV3 KNN on m-eurosat too low: {knn}"
+        assert linear > 0.80, f"MobileNetV3 linear on m-eurosat too low: {linear}"
+
+    def test_forestnet(self):
+        """MobileNetV3-Small on m-forestnet default partition."""
+        result = _run_bench(
+            "model=timm/mobilenetv3_small_100",
+            "dataset.names=[m-forestnet]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn > 0.20, f"MobileNetV3 KNN on m-forestnet too low: {knn}"
+        assert linear > 0.35, f"MobileNetV3 linear on m-forestnet too low: {linear}"
