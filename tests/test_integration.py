@@ -68,17 +68,23 @@ class TestForestnetResNet18Pipeline:
         )
 
     def test_knn_and_linear(self):
-        """Full run: KNN + linear probe produces valid CSV output."""
+        """Full run: KNN + linear probe produces valid CSV with expected performance."""
         result = self._run()
         assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
 
         df = pd.read_csv(self.output)
         assert len(df) >= 2, f"Expected ≥2 rows (knn + linear), got {len(df)}"
         assert set(df["method"]).issuperset({"knn5", "linear"})
-        assert (df["metric_value"] > 0).all(), "All metrics should be > 0"
-        assert (df["metric_value"] <= 1).all(), "All metrics should be ≤ 1"
         assert (df["dataset"] == "m-forestnet").all()
         assert (df["name"] == "resnet18").all()
+
+        # Performance sanity checks (1% partition, resnet18 ImageNet pretrained)
+        # Observed: KNN ~0.31, linear ~0.46; bounds set conservatively
+        knn = df[df["method"] == "knn5"].iloc[0]
+        assert knn["metric_value"] > 0.15, f"KNN accuracy too low: {knn['metric_value']}"
+
+        linear = df[df["method"] == "linear"].iloc[0]
+        assert linear["metric_value"] > 0.30, f"Linear accuracy too low: {linear['metric_value']}"
 
     def test_knn_only(self):
         """Skip linear probe and verify only KNN results."""
@@ -132,10 +138,18 @@ class TestEurosatResNet18Pipeline:
         assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
 
         df = pd.read_csv(self.output)
+
+        # Performance checks (1% partition, resnet18 ImageNet pretrained)
+        # Observed: KNN ~0.28, linear ~0.91; bounds set conservatively
+        knn = df[df["method"] == "knn5"]
+        assert len(knn) == 1
+        assert knn.iloc[0]["metric_value"] > 0.15, (
+            f"KNN accuracy too low: {knn.iloc[0]['metric_value']}"
+        )
+
         linear = df[df["method"] == "linear"]
         assert len(linear) == 1
-        # Even 1% partition should beat random (10 classes → 0.10)
-        assert linear.iloc[0]["metric_value"] > 0.15, (
+        assert linear.iloc[0]["metric_value"] > 0.60, (
             f"Linear accuracy too low: {linear.iloc[0]['metric_value']}"
         )
 
