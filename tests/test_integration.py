@@ -10,24 +10,29 @@ Run with::
     pytest -m slow tests/test_integration.py
     pytest -m slow                           # all slow tests
     pytest -m slow -k forestnet              # just forestnet tests
+
+Expected values below were measured with seed=0 and are perfectly
+reproducible across runs.  Tolerance is set to ±0.02 to absorb minor
+library-version differences without masking real regressions.
 """
 
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 GEOBENCH_ROOT = Path(os.getenv("GEOBENCH_ROOT", "data/classification_v1.0"))
-GEOBENCH_V2_ROOT = Path(os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2"))
 
 # Re-usable skip condition
 _skip_no_v1 = pytest.mark.skipif(
     not GEOBENCH_ROOT.exists(), reason=f"GeoBench V1 data not found at {GEOBENCH_ROOT}"
 )
+
+# Tolerance for metric comparisons (absorbs minor library version diffs)
+_TOL = 0.02
 
 
 def _run_bench(*overrides: str, timeout: int = 300) -> subprocess.CompletedProcess:
@@ -50,7 +55,7 @@ def _run_bench(*overrides: str, timeout: int = 300) -> subprocess.CompletedProce
 @pytest.mark.slow
 @_skip_no_v1
 class TestForestnetResNet18Pipeline:
-    """End-to-end benchmark on m-forestnet with timm resnet18."""
+    """End-to-end benchmark on m-forestnet with timm resnet18 (1% partition)."""
 
     @pytest.fixture(autouse=True)
     def _output_csv(self, tmp_path):
@@ -67,24 +72,22 @@ class TestForestnetResNet18Pipeline:
             *extra,
         )
 
+    # Expected (seed=0, 1% partition): knn5=0.3112, linear=0.4622
+
     def test_knn_and_linear(self):
-        """Full run: KNN + linear probe produces valid CSV with expected performance."""
+        """Full run: KNN + linear probe with tight performance check."""
         result = self._run()
         assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
 
         df = pd.read_csv(self.output)
-        assert len(df) >= 2, f"Expected ≥2 rows (knn + linear), got {len(df)}"
         assert set(df["method"]).issuperset({"knn5", "linear"})
         assert (df["dataset"] == "m-forestnet").all()
         assert (df["name"] == "resnet18").all()
 
-        # Performance sanity checks (1% partition, resnet18 ImageNet pretrained)
-        # Observed: KNN ~0.31, linear ~0.46; bounds set conservatively
-        knn = df[df["method"] == "knn5"].iloc[0]
-        assert knn["metric_value"] > 0.15, f"KNN accuracy too low: {knn['metric_value']}"
-
-        linear = df[df["method"] == "linear"].iloc[0]
-        assert linear["metric_value"] > 0.30, f"Linear accuracy too low: {linear['metric_value']}"
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn == pytest.approx(0.311, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.462, abs=_TOL), f"Linear={linear}"
 
     def test_knn_only(self):
         """Skip linear probe and verify only KNN results."""
@@ -94,7 +97,7 @@ class TestForestnetResNet18Pipeline:
         df = pd.read_csv(self.output)
         assert len(df) == 1
         assert df.iloc[0]["method"] == "knn5"
-        assert 0 < df.iloc[0]["metric_value"] <= 1
+        assert df.iloc[0]["metric_value"] == pytest.approx(0.311, abs=_TOL)
 
     def test_resume_skips_completed(self):
         """Resume mode skips already-computed results."""
@@ -119,14 +122,16 @@ class TestForestnetResNet18Pipeline:
 @pytest.mark.slow
 @_skip_no_v1
 class TestEurosatResNet18Pipeline:
-    """End-to-end benchmark on m-eurosat with timm resnet18."""
+    """End-to-end benchmark on m-eurosat with timm resnet18 (1% partition)."""
 
     @pytest.fixture(autouse=True)
     def _output_csv(self, tmp_path):
         self.output = str(tmp_path / "eurosat_results.csv")
 
+    # Expected (seed=0, 1% partition): knn5=0.279, linear=0.910
+
     def test_full_run(self):
-        """Full pipeline on m-eurosat produces reasonable accuracy."""
+        """Full pipeline on m-eurosat with tight performance check."""
         result = _run_bench(
             "model=timm/resnet18",
             "dataset.names=[m-eurosat]",
@@ -138,20 +143,10 @@ class TestEurosatResNet18Pipeline:
         assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
 
         df = pd.read_csv(self.output)
-
-        # Performance checks (1% partition, resnet18 ImageNet pretrained)
-        # Observed: KNN ~0.28, linear ~0.91; bounds set conservatively
-        knn = df[df["method"] == "knn5"]
-        assert len(knn) == 1
-        assert knn.iloc[0]["metric_value"] > 0.15, (
-            f"KNN accuracy too low: {knn.iloc[0]['metric_value']}"
-        )
-
-        linear = df[df["method"] == "linear"]
-        assert len(linear) == 1
-        assert linear.iloc[0]["metric_value"] > 0.60, (
-            f"Linear accuracy too low: {linear.iloc[0]['metric_value']}"
-        )
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn == pytest.approx(0.279, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.910, abs=_TOL), f"Linear={linear}"
 
 
 # ---------------------------------------------------------------------------
@@ -222,16 +217,19 @@ class TestMultiDatasetRun:
 
 
 # ---------------------------------------------------------------------------
-# Additional model baselines (full default partition)
+# Model baselines (default partition, seed=0)
 # ---------------------------------------------------------------------------
-
-# Expected performance from results/all_results_old.csv (default partition).
-# Bounds are set well below observed values to be robust to minor changes.
 #
-# model                  | m-eurosat knn | m-eurosat linear | m-forestnet knn | m-forestnet linear
-# rcf                    | 0.575         | 0.586            | 0.228           | 0.428
-# imagestats             | 0.597         | 0.718            | 0.212           | 0.338
-# mobilenetv3_small_100  | 0.815         | 0.933            | 0.356           | 0.503
+# Verified deterministic (0 diff across runs).  Expected values:
+#
+# model                  | dataset     | knn5   | linear
+# rcf                    | m-eurosat   | 0.6110 | 0.7690
+# rcf                    | m-forestnet | 0.2276 | 0.4693
+# imagestats             | m-eurosat   | 0.5970 | 0.7180
+# mobilenetv3_small_100  | m-eurosat   | 0.8150 | 0.9330
+# mobilenetv3_small_100  | m-forestnet | 0.3565 | 0.4975
+# resnet18               | m-eurosat   | 0.8580 | 0.9290
+# resnet18               | m-forestnet | 0.3666 | 0.5277
 
 
 @pytest.mark.slow
@@ -256,8 +254,8 @@ class TestRCFBaseline:
         df = pd.read_csv(self.output)
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn > 0.40, f"RCF KNN on m-eurosat too low: {knn}"
-        assert linear > 0.40, f"RCF linear on m-eurosat too low: {linear}"
+        assert knn == pytest.approx(0.611, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.769, abs=_TOL), f"Linear={linear}"
 
     def test_forestnet(self):
         """RCF on m-forestnet default partition."""
@@ -272,8 +270,8 @@ class TestRCFBaseline:
         df = pd.read_csv(self.output)
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn > 0.12, f"RCF KNN on m-forestnet too low: {knn}"
-        assert linear > 0.25, f"RCF linear on m-forestnet too low: {linear}"
+        assert knn == pytest.approx(0.228, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.469, abs=_TOL), f"Linear={linear}"
 
 
 @pytest.mark.slow
@@ -298,8 +296,8 @@ class TestImageStatsBaseline:
         df = pd.read_csv(self.output)
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn > 0.40, f"ImageStats KNN on m-eurosat too low: {knn}"
-        assert linear > 0.50, f"ImageStats linear on m-eurosat too low: {linear}"
+        assert knn == pytest.approx(0.597, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.718, abs=_TOL), f"Linear={linear}"
 
 
 @pytest.mark.slow
@@ -324,8 +322,8 @@ class TestMobileNetV3Baseline:
         df = pd.read_csv(self.output)
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn > 0.65, f"MobileNetV3 KNN on m-eurosat too low: {knn}"
-        assert linear > 0.80, f"MobileNetV3 linear on m-eurosat too low: {linear}"
+        assert knn == pytest.approx(0.815, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.933, abs=_TOL), f"Linear={linear}"
 
     def test_forestnet(self):
         """MobileNetV3-Small on m-forestnet default partition."""
@@ -340,5 +338,47 @@ class TestMobileNetV3Baseline:
         df = pd.read_csv(self.output)
         knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
         linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
-        assert knn > 0.20, f"MobileNetV3 KNN on m-forestnet too low: {knn}"
-        assert linear > 0.35, f"MobileNetV3 linear on m-forestnet too low: {linear}"
+        assert knn == pytest.approx(0.357, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.498, abs=_TOL), f"Linear={linear}"
+
+
+@pytest.mark.slow
+@_skip_no_v1
+class TestResNet18FullPartition:
+    """ResNet18 on full default partition — strongest timm baseline."""
+
+    @pytest.fixture(autouse=True)
+    def _output_csv(self, tmp_path):
+        self.output = str(tmp_path / "resnet18_full_results.csv")
+
+    def test_eurosat(self):
+        """ResNet18 on m-eurosat default partition."""
+        result = _run_bench(
+            "model=timm/resnet18",
+            "dataset.names=[m-eurosat]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn == pytest.approx(0.858, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.929, abs=_TOL), f"Linear={linear}"
+
+    def test_forestnet(self):
+        """ResNet18 on m-forestnet default partition."""
+        result = _run_bench(
+            "model=timm/resnet18",
+            "dataset.names=[m-forestnet]",
+            f"output={self.output}",
+            "eval.bootstrap=10",
+            "device=cuda:0",
+        )
+        assert result.returncode == 0, f"CLI failed:\n{result.stderr}"
+        df = pd.read_csv(self.output)
+        knn = df[df["method"] == "knn5"].iloc[0]["metric_value"]
+        linear = df[df["method"] == "linear"].iloc[0]["metric_value"]
+        assert knn == pytest.approx(0.367, abs=_TOL), f"KNN={knn}"
+        assert linear == pytest.approx(0.528, abs=_TOL), f"Linear={linear}"
