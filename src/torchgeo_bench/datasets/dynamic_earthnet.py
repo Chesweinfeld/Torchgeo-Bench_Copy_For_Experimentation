@@ -1,24 +1,19 @@
 """Dynamic EarthNet (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class DynamicEarthNet(BenchDataset):
+class DynamicEarthNet(_V2Dataset):
     """Planet + Sentinel-2 land-cover change segmentation (7 classes)."""
+
+    band_order_strategy = "by_sensor"
 
     name = "dynamic_earthnet"
     task = "segmentation"
     num_classes = 7
     multilabel = False
-    rgb_bands = ["b04", "b03", "b02"]
+    rgb_bands = ["r", "g", "b"]
     split_sizes = {"train": 700, "val": 100, "test": 200}
 
     bands = [
@@ -39,28 +34,3 @@ class DynamicEarthNet(BenchDataset):
         BandSpec("s2", "b11", "B11", wavelength_um=1.61, mean=1003.9291, std=1475.8456),
         BandSpec("s2", "b12", "B12", wavelength_um=2.19, mean=3031.0217, std=2124.4131),
     ]
-
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchDynamicEarthNet(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )

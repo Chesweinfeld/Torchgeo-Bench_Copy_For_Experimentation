@@ -1,15 +1,18 @@
 """Base classes for torchgeo-bench dataset definitions.
 
 Every benchmark dataset is a subclass of :class:`BenchDataset` that declares
-its metadata (bands, number of classes, task type, split sizes) and knows
-how to produce a PyTorch :class:`~torch.utils.data.Dataset` for each split.
-"""
+its metadata (bands, number of classes, task type, split sizes) and knows how
+to produce a PyTorch :class:`~torch.utils.data.Dataset` for each split.
 
-from __future__ import annotations
+Datasets always live under ``data/`` (relative to the current working
+directory). Each family base class (``_V1Dataset``, ``_V2Dataset``) and the
+torchgeo :class:`~torchgeo_bench.datasets.eurosat.EuroSAT` wrapper exposes its
+own :meth:`BenchDataset.data_root` returning the family-specific subdirectory.
+"""
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -28,7 +31,7 @@ class BandSpec:
             ``"aerial"``, ``"sar"``, ``"planet"``, ``"worldview"``).
         name: Canonical short band name used in the public API
             (e.g. ``"red"``, ``"b02"``, ``"nir"``, ``"vv"``).
-        source_name: Band key as it appears in the data files.  For V1 HDF5
+        source_name: Band key as it appears in the data files. For V1 HDF5
             files this is the long form (``"04 - Red"``); for V2 datasets
             this is typically the uppercase band code (``"B04"``).
         wavelength_um: Approximate centre wavelength in micrometres.
@@ -49,7 +52,7 @@ class BenchDataset(ABC):
     """Abstract base class for benchmark datasets.
 
     Subclasses must define the class-level metadata attributes listed below
-    and implement :meth:`get_dataset`.
+    and implement :meth:`get_dataset` and :meth:`data_root`.
 
     Attributes:
         name: Dataset identifier used on the command line (e.g. ``"m-eurosat"``).
@@ -60,6 +63,8 @@ class BenchDataset(ABC):
         split_sizes: Number of samples per split for the *default* partition,
             keyed by ``"train"``, ``"val"``, ``"test"``.
         multilabel: Whether labels are multi-hot (e.g. BigEarthNet).
+        supports_partitions: Whether the dataset honours a non-default
+            ``partition`` argument (V1 GeoBench datasets do; V2 does not).
     """
 
     name: str
@@ -69,13 +74,7 @@ class BenchDataset(ABC):
     rgb_bands: list[str]
     split_sizes: dict[str, int]
     multilabel: bool = False
-
-    def __init__(self, root: str | Path) -> None:
-        self.root = Path(root)
-
-    # ------------------------------------------------------------------
-    # Convenience properties
-    # ------------------------------------------------------------------
+    supports_partitions: bool = False
 
     @property
     def num_channels(self) -> int:
@@ -88,9 +87,33 @@ class BenchDataset(ABC):
         names = [b.name for b in self.bands]
         return [names.index(s) for s in self.rgb_bands if s in names]
 
-    # ------------------------------------------------------------------
-    # Data loading
-    # ------------------------------------------------------------------
+    @classmethod
+    @abstractmethod
+    def data_root(cls) -> Path:
+        """Return the directory the upstream loader expects.
+
+        For V1/V2 wrappers this is the *parent* directory containing per-dataset
+        subdirectories (e.g. ``data/classification_v1.0``); for torchgeo
+        wrappers it is the dataset's own root (e.g. ``data/eurosat``).
+        """
+
+    def _select_band_specs(self, bands: Iterable[str] | None) -> list[BandSpec]:
+        """Return the :class:`BandSpec` entries matching *bands*.
+
+        Preserves the order given by *bands*. Raises ``ValueError`` if any
+        requested band is not declared on the dataset.
+        """
+        if bands is None:
+            return list(self.bands)
+        by_name = {b.name: b for b in self.bands}
+        result: list[BandSpec] = []
+        for name in bands:
+            if name not in by_name:
+                raise ValueError(
+                    f"{type(self).__name__}: unknown band {name!r}; available: {sorted(by_name)}"
+                )
+            result.append(by_name[name])
+        return result
 
     @abstractmethod
     def get_dataset(
@@ -107,13 +130,13 @@ class BenchDataset(ABC):
         Args:
             split: ``"train"``, ``"val"``, or ``"test"``.
             partition: Partition name (V1 only, e.g. ``"0.01x_train"``).
-                Ignored by V2 datasets.
-            bands: Tuple of canonical band names to load.  ``None`` loads all.
+                Ignored by datasets where :attr:`supports_partitions` is
+                ``False``.
+            bands: Tuple of canonical band names to load. ``None`` loads all.
             transform: Optional sample transform callable.
             normalize: Normalization strategy — ``"mean_stdev"``,
                 ``"min_max"``, ``"percentile_2_98"``, or ``"none"``.
         """
-        raise NotImplementedError
 
     def get_dataloader(
         self,
@@ -125,17 +148,7 @@ class BenchDataset(ABC):
         pin_memory: bool = True,
         **dataset_kwargs,
     ) -> DataLoader:
-        """Convenience wrapper: build a :class:`~torch.utils.data.DataLoader`.
-
-        Args:
-            split: ``"train"``, ``"val"``, or ``"test"``.
-            batch_size: Batch size.
-            num_workers: Number of dataloader worker processes.
-            shuffle: Shuffle the data.  Defaults to ``True`` for train,
-                ``False`` otherwise.
-            pin_memory: Pin memory for CUDA transfers.
-            **dataset_kwargs: Forwarded to :meth:`get_dataset`.
-        """
+        """Convenience wrapper: build a :class:`~torch.utils.data.DataLoader`."""
         ds = self.get_dataset(split, **dataset_kwargs)
         if shuffle is None:
             shuffle = split == "train"

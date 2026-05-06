@@ -1,21 +1,16 @@
 """BENV2 (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class BENV2(BenchDataset):
+class BENV2(_V2Dataset):
     """Sentinel-2 + SAR multi-class classification (19 classes).
 
     BigEarthNet V2 with 12 Sentinel-2 optical bands and 2 SAR bands.
     """
+
+    band_order_strategy = "by_sensor"
 
     name = "benv2"
     task = "classification"
@@ -37,31 +32,6 @@ class BENV2(BenchDataset):
         BandSpec("s2", "b09", "B09", wavelength_um=0.945, mean=2289.5381, std=1267.3955),
         BandSpec("s2", "b11", "B11", wavelength_um=1.61, mean=1556.9587, std=984.2933),
         BandSpec("s2", "b12", "B12", wavelength_um=2.19, mean=973.8273, std=753.2082),
-        BandSpec("sar", "vv", "VV", mean=-18.9633, std=5.3961),
-        BandSpec("sar", "vh", "VH", mean=-12.0919, std=4.5749),
+        BandSpec("s1", "vv", "VV", mean=-18.9633, std=5.3961),
+        BandSpec("s1", "vh", "VH", mean=-12.0919, std=4.5749),
     ]
-
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchBENV2(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )

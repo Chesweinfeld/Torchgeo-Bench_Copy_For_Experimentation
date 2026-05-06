@@ -1,21 +1,16 @@
 """TreeSatAI (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class TreeSatAI(BenchDataset):
+class TreeSatAI(_V2Dataset):
     """Aerial + Sentinel-2 + SAR tree species classification (13 classes).
 
     Multi-sensor dataset with aerial RGB+NIR, 12 Sentinel-2 bands, and 3 SAR bands.
     """
+
+    band_order_strategy = "by_sensor"
 
     name = "treesatai"
     task = "classification"
@@ -41,32 +36,7 @@ class TreeSatAI(BenchDataset):
         BandSpec("s2", "b12", "B12", wavelength_um=2.19, mean=594.2034, std=234.4886),
         BandSpec("s2", "b01", "B01", wavelength_um=0.443, mean=265.807, std=125.9928),
         BandSpec("s2", "b09", "B09", wavelength_um=0.945, mean=2962.1824, std=674.1692),
-        BandSpec("sar", "vv", "vv", mean=-6.3649, std=3.5287),
-        BandSpec("sar", "vh", "vh", mean=-12.5086, std=3.2121),
-        BandSpec("sar", "vv_vh", "vv/vh", mean=0.4892, std=0.2583),
+        BandSpec("s1", "vv", "vv", mean=-6.3649, std=3.5287),
+        BandSpec("s1", "vh", "vh", mean=-12.5086, std=3.2121),
+        BandSpec("s1", "vv_vh", "vv/vh", mean=0.4892, std=0.2583),
     ]
-
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchTreeSatAI(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )

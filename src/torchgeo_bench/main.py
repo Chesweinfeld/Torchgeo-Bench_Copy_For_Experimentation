@@ -17,14 +17,22 @@ from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from torchgeo_bench.dataset_info import list_available_datasets, load_dataset_info
-from torchgeo_bench.datasets import get_datasets, is_dataset_available
+from torchgeo_bench.datasets import (
+    get_bench_dataset_class,
+    get_datasets,
+    list_datasets,
+)
 from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 from torchgeo_bench.segmentation_task import SegmentationSolver
 from torchgeo_bench.utils import extract_features
+
+try:
+    from torchgeo.datasets.errors import DatasetNotFoundError
+except ImportError:  # pragma: no cover - older torchgeo versions
+    DatasetNotFoundError = FileNotFoundError  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +53,7 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
     """
     if isinstance(names, str):
         if names == "all":
-            return list_available_datasets()
+            return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
 
@@ -169,12 +177,11 @@ def evaluate_knn(
     y_test: np.ndarray,
     seed: int,
     n_bootstrap: int,
-    device: str = "cpu",
     verbose: bool = False,
 ) -> tuple[float, float, float]:
     """Evaluate KNN classifier. Auto-detects single-label vs multi-label from y shape."""
     multi_label = y_train.ndim == 2
-    clf = KNNClassifier(n_neighbors=5, device=device)
+    clf = KNNClassifier(n_neighbors=5)
     clf.fit(x_train, y_train)
 
     if multi_label:
@@ -423,19 +430,11 @@ def main(cfg: DictConfig) -> None:
     normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
-        # Load dataset metadata from config
+        # Resolve metadata via the BenchDataset registry (no I/O).
         try:
-            ds_info = load_dataset_info(ds_name)
-        except FileNotFoundError:
-            logger.warning(f"Skipping dataset {ds_name} (no config file found)")
-            continue
-
-        if not is_dataset_available(
-            ds_name,
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-        ):
-            logger.warning(f"Skipping dataset {ds_name} (data not found on disk)")
+            ds_cls = get_bench_dataset_class(ds_name)
+        except KeyError:
+            logger.warning(f"Skipping dataset {ds_name} (not in registry)")
             continue
 
         # Check if we can skip this dataset entirely
@@ -454,28 +453,30 @@ def main(cfg: DictConfig) -> None:
         seg_method = f"seg-{cfg.eval.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
 
-        result = get_datasets(
-            dataset_name=ds_name,
-            partition_name=cfg.dataset.partition,
-            batch_size=cfg.dataset.batch_size,
-            normalization=normalization,
-            return_val=True,
-            image_size=getattr(cfg.dataset, "image_size", None),
-            interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
-            geobench_root=getattr(cfg.dataset, "geobench_root", None),
-            geobench_v2_root=getattr(cfg.dataset, "geobench_v2_root", None),
-            bands=getattr(cfg.dataset, "bands", "rgb"),
-        )
+        try:
+            result = get_datasets(
+                dataset_name=ds_name,
+                partition_name=cfg.dataset.partition,
+                batch_size=cfg.dataset.batch_size,
+                normalization=normalization,
+                return_val=True,
+                image_size=getattr(cfg.dataset, "image_size", None),
+                interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
+                bands=getattr(cfg.dataset, "bands", "rgb"),
+            )
+        except (FileNotFoundError, DatasetNotFoundError) as exc:
+            logger.warning(f"Skipping dataset {ds_name} (data not found: {exc})")
+            continue
         if result is None or not isinstance(result, tuple) or len(result) != 4:
             logger.warning(f"Skipping dataset {ds_name} (unexpected return)")
             continue
         train_dataset, train_loader, val_loader, test_loader = result
 
-        # Use metadata from dataset config
+        # Use metadata from the BenchDataset class
         num_channels = train_dataset[0]["image"].shape[0]
-        is_segmentation = ds_info.task == "segmentation"
-        is_multilabel = ds_info.multilabel
-        num_classes = ds_info.num_classes
+        is_segmentation = ds_cls.task == "segmentation"
+        is_multilabel = ds_cls.multilabel
+        num_classes = ds_cls.num_classes
 
         # Resume check for segmentation
         if is_segmentation and cfg.resume and seg_key in completed_runs:
@@ -532,7 +533,7 @@ def main(cfg: DictConfig) -> None:
             all_rows.append(
                 EvaluationResult(
                     **common_meta,
-                    method=cfg.eval.segmentation.head_type,
+                    method=seg_method,
                     metric_name="mIoU",
                     metric_value=miou,
                     ci_lower=0.0,
@@ -569,7 +570,6 @@ def main(cfg: DictConfig) -> None:
                     y_test,
                     cfg.seed,
                     cfg.eval.bootstrap,
-                    cfg.device,
                     verbose=cfg.verbose,
                 )
                 all_rows.append(

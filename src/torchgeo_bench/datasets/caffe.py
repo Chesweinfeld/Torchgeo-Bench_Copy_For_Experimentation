@@ -1,24 +1,19 @@
 """CaFFe (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class CaFFe(BenchDataset):
-    """Aerial grayscale classification (4 classes).
+class CaFFe(_V2Dataset):
+    """Aerial grayscale calving-front segmentation (4 classes).
 
-    CaFFe dataset with a single grayscale aerial band.
+    The upstream GeoBench V2 dataset returns ``(image, mask)`` pairs, so this
+    wrapper exposes it as a segmentation task even though the dataset name
+    historically suggested classification.
     """
 
     name = "caffe"
-    task = "classification"
+    task = "segmentation"
     num_classes = 4
     multilabel = False
     rgb_bands = ["gray"]
@@ -27,28 +22,3 @@ class CaFFe(BenchDataset):
     bands = [
         BandSpec("aerial", "gray", "gray", mean=62.6825, std=79.8002),
     ]
-
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchCaFFe(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )

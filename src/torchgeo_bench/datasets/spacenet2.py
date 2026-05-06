@@ -1,21 +1,16 @@
 """SpaceNet2 (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class SpaceNet2(BenchDataset):
+class SpaceNet2(_V2Dataset):
     """WorldView building footprint segmentation (3 classes).
 
     8 multispectral + 1 panchromatic band from WorldView satellite.
     """
+
+    band_order_strategy = "by_sensor"
 
     name = "spacenet2"
     task = "segmentation"
@@ -33,30 +28,5 @@ class SpaceNet2(BenchDataset):
         BandSpec("worldview", "red_edge", "red_edge", mean=408.6689, std=208.4557),
         BandSpec("worldview", "nir1", "nir1", mean=475.0842, std=234.7585),
         BandSpec("worldview", "nir2", "nir2", mean=362.3487, std=193.2321),
-        BandSpec("worldview", "pan", "pan", mean=468.574, std=260.8954),
+        BandSpec("pan", "pan", "pan", mean=468.574, std=260.8954),
     ]
-
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchSpaceNet2(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )

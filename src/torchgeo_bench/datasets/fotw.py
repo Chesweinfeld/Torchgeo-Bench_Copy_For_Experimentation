@@ -1,20 +1,15 @@
 """Fields of the World (GeoBench V2) benchmark dataset."""
 
-from __future__ import annotations
-
-import os
-from collections.abc import Callable
-from pathlib import Path
-
-from torch.utils.data import Dataset
-
-from .base import BandSpec, BenchDataset
+from .base import BandSpec
+from .geobench_v2 import _V2Dataset
 
 
-class FieldsOfTheWorld(BenchDataset):
+class FieldsOfTheWorld(_V2Dataset):
     """Sentinel-2 field boundary segmentation (4 classes).
 
-    Classes: background, field, boundary, other.
+    Classes: background, field, boundary, other. Upstream returns
+    ``image_a`` / ``image_b`` change-detection pairs;
+    :meth:`canonicalize_sample` keeps the later acquisition (``image_b``).
     """
 
     name = "fotw"
@@ -31,27 +26,9 @@ class FieldsOfTheWorld(BenchDataset):
         BandSpec("s2", "nir", "nir", mean=2984.3018, std=1043.6527),
     ]
 
-    def __init__(self, root: str | Path | None = None) -> None:
-        if root is None:
-            root = os.getenv("GEOBENCH_V2_ROOT", "data/geobenchv2")
-        super().__init__(root)
-
-    def get_dataset(
-        self,
-        split: str,
-        *,
-        partition: str = "default",
-        bands: tuple[str, ...] | None = None,
-        transform: Callable | None = None,
-        normalize: str = "mean_stdev",
-    ) -> Dataset:
-        """Return a PyTorch Dataset for the given split."""
-        del partition, normalize
-        import geobench_v2.datasets as gb_v2
-
-        return gb_v2.GeoBenchFieldsOfTheWorld(
-            root=os.path.join(self.root, self.name),
-            split=split,
-            transforms=transform,
-            band_order=bands,
-        )
+    def canonicalize_sample(self, sample: dict) -> dict:
+        """Pick the later acquisition (``image_b``) and surface it as ``image``."""
+        if "image" not in sample and "image_b" in sample:
+            sample["image"] = sample.pop("image_b")
+            sample.pop("image_a", None)
+        return sample

@@ -19,6 +19,7 @@ license = { text = "MIT" }
 authors = [
   { name = "Caleb Robinson", email = "calebrob6@gmail.com" },
   { name = "Isaac Corley", email = "isaac.a.corley@gmail.com" },
+  { name = "Nils Lehmann", email = "nils.lehmann24@gmail.com" },
 ]
 requires-python = ">=3.12"
 classifiers = [
@@ -102,7 +103,7 @@ lint.ignore = [
   "E501", # line too long (handled by ruff format)
 ]
 lint.per-file-ignores."scripts/**/*.py" = [ "D" ]
-lint.per-file-ignores."tests/**/*.py" = [ "D" ]
+lint.per-file-ignores."tests/**/*.py" = [ "ARG", "D" ]
 lint.pydocstyle.convention = "google"
 
 [tool.pytest]
