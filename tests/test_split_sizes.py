@@ -20,16 +20,12 @@ or a bug in our wrapper's ``get_dataset`` plumbing.
 """
 
 import pytest
+from torchgeo.datasets.errors import DatasetNotFoundError
 
 from torchgeo_bench.datasets import (
     get_bench_dataset_class,
     list_datasets,
 )
-
-try:
-    from torchgeo.datasets.errors import DatasetNotFoundError
-except ImportError:  # pragma: no cover
-    DatasetNotFoundError = FileNotFoundError  # type: ignore[misc,assignment]
 
 # Expected sizes per (dataset, split).  Sourced from:
 #   * V1: ``data/classification_v1.0/<name>/default_partition.json``

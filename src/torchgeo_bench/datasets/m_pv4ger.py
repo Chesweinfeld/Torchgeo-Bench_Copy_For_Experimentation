@@ -17,8 +17,10 @@ class MPv4ger(_V1Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 11814, "val": 999, "test": 999}
 
+    # fmt: off
     bands = [
-        BandSpec("aerial", "blue", "Blue", mean=116.63, std=44.67),
-        BandSpec("aerial", "green", "Green", mean=119.66, std=48.28),
-        BandSpec("aerial", "red", "Red", mean=113.39, std=54.2),
+        BandSpec("aerial", "blue", "Blue", mean=116.316, std=44.5176, min=2, max=254),
+        BandSpec("aerial", "green", "Green", mean=119.375, std=48.1189, min=7, max=254),
+        BandSpec("aerial", "red", "Red", mean=113.102, std=54.0881, min=1, max=254),
     ]
+    # fmt: on

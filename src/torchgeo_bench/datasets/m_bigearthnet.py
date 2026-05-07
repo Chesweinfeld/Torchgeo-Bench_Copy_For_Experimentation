@@ -18,59 +18,19 @@ class MBigEarthNet(_V1Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 20000, "val": 1000, "test": 1000}
 
+    # fmt: off
     bands = [
-        BandSpec(
-            "s2",
-            "coastal_aerosol",
-            "01 - Coastal aerosol",
-            wavelength_um=0.443,
-            mean=386.65,
-            std=467.31,
-        ),
-        BandSpec("s2", "blue", "02 - Blue", wavelength_um=0.49, mean=488.99, std=510.79),
-        BandSpec("s2", "green", "03 - Green", wavelength_um=0.56, mean=714.61, std=551.8),
-        BandSpec("s2", "red", "04 - Red", wavelength_um=0.665, mean=738.26, std=691.78),
-        BandSpec(
-            "s2",
-            "red_edge_1",
-            "05 - Vegetation Red Edge",
-            wavelength_um=0.705,
-            mean=1114.42,
-            std=700.45,
-        ),
-        BandSpec(
-            "s2",
-            "red_edge_2",
-            "06 - Vegetation Red Edge",
-            wavelength_um=0.74,
-            mean=1910.19,
-            std=976.75,
-        ),
-        BandSpec(
-            "s2",
-            "red_edge_3",
-            "07 - Vegetation Red Edge",
-            wavelength_um=0.783,
-            mean=2191.48,
-            std=1134.89,
-        ),
-        BandSpec("s2", "nir", "08 - NIR", wavelength_um=0.842, mean=2334.29, std=1238.07),
-        BandSpec(
-            "s2",
-            "red_edge_4",
-            "08A - Vegetation Red Edge",
-            wavelength_um=0.865,
-            mean=2392.91,
-            std=1215.98,
-        ),
-        BandSpec(
-            "s2",
-            "water_vapour",
-            "09 - Water vapour",
-            wavelength_um=0.945,
-            mean=2367.29,
-            std=1153.86,
-        ),
-        BandSpec("s2", "swir_1", "11 - SWIR", wavelength_um=1.61, mean=1902.69, std=1117.01),
-        BandSpec("s2", "swir_2", "12 - SWIR", wavelength_um=2.19, mean=1261.07, std=894.74),
+        BandSpec("s2", "coastal_aerosol", "01 - Coastal aerosol", mean=378.402, std=462.463, min=1, max=18268, wavelength_um=0.443),
+        BandSpec("s2", "blue", "02 - Blue", mean=482.274, std=519.331, min=0, max=20545, wavelength_um=0.49),
+        BandSpec("s2", "green", "03 - Green", mean=706.537, std=552.357, min=0, max=18989, wavelength_um=0.56),
+        BandSpec("s2", "red", "04 - Red", mean=720.926, std=680.972, min=0, max=17881, wavelength_um=0.665),
+        BandSpec("s2", "red_edge_1", "05 - Vegetation Red Edge", mean=1100.67, std=690.282, min=0, max=16186, wavelength_um=0.705),
+        BandSpec("s2", "red_edge_2", "06 - Vegetation Red Edge", mean=1909.29, std=982.218, min=0, max=16039, wavelength_um=0.74),
+        BandSpec("s2", "red_edge_3", "07 - Vegetation Red Edge", mean=2191.7, std=1143.42, min=0, max=15956, wavelength_um=0.783),
+        BandSpec("s2", "nir", "08 - NIR", mean=2336.86, std=1248.04, min=0, max=16708, wavelength_um=0.842),
+        BandSpec("s2", "red_edge_4", "08A - Vegetation Red Edge", mean=2394.74, std=1223.65, min=0, max=15825, wavelength_um=0.865),
+        BandSpec("s2", "water_vapour", "09 - Water vapour", mean=2368.32, std=1166.83, min=1, max=15593, wavelength_um=0.945),
+        BandSpec("s2", "swir_1", "11 - SWIR", mean=1875.26, std=1092.42, min=0, max=15422, wavelength_um=1.61),
+        BandSpec("s2", "swir_2", "12 - SWIR", mean=1229.38, std=862.716, min=0, max=15258, wavelength_um=2.19),
     ]
+    # fmt: on

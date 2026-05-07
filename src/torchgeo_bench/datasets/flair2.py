@@ -20,10 +20,12 @@ class FLAIR2(_V2Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 4049, "val": 1022, "test": 3022}
 
+    # fmt: off
     bands = [
-        BandSpec("aerial", "red", "red", mean=110.305, std=50.71),
-        BandSpec("aerial", "green", "green", mean=114.7908, std=44.3165),
-        BandSpec("aerial", "blue", "blue", mean=105.6127, std=43.2948),
-        BandSpec("aerial", "nir", "nir", mean=104.3409, std=39.0496),
-        BandSpec("elevation", "elevation", "elevation", mean=17.6965, std=29.9427),
+        BandSpec("aerial", "red", "red", mean=111.395, std=51.2846, min=0, max=255),
+        BandSpec("aerial", "green", "green", mean=115.788, std=45.1, min=0, max=255),
+        BandSpec("aerial", "blue", "blue", mean=106.896, std=44.4006, min=0, max=255),
+        BandSpec("aerial", "nir", "nir", mean=104.085, std=39.566, min=0, max=255),
+        BandSpec("elevation", "elevation", "elevation", mean=17.7749, std=30.34, min=0, max=255),
     ]
+    # fmt: on

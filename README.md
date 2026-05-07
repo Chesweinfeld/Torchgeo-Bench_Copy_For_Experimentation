@@ -280,6 +280,7 @@ dataset:
   partition: default
   batch_size: 64
   normalization: mean_stdev  # or min_max, percentile_2_98, none
+  bands: rgb                 # rgb | all | explicit list (e.g. [red, green, blue, nir])
   image_size: 224            # null to preserve native size
   interpolation: bilinear    # bilinear, bicubic, or nearest
   geobench_root: data/classification_v1.0    # V1 dataset location
@@ -319,6 +320,39 @@ torchgeo-bench run dataset.geobench_root=/path/to/v1 dataset.geobench_v2_root=/p
 # Configure segmentation evaluation
 torchgeo-bench run eval.segmentation.epochs=5 eval.segmentation.lr=0.0001
 ```
+
+### All-band experiments
+
+`dataset.bands` controls which spectral bands are loaded:
+
+- `dataset.bands=rgb` (default) — uses each dataset's RGB triplet.
+- `dataset.bands=all` — loads every band declared on the `BenchDataset` wrapper
+  (e.g. all 13 Sentinel-2 bands for `m-eurosat`).
+- `dataset.bands=[red,green,blue,nir]` — explicit subset.
+
+The runner automatically passes the resulting channel count to the model
+constructor (`OmegaConf.merge(cfg.model, {"num_channels": num_channels})`),
+and the result CSV records the `bands` value so multiple runs into the same
+file (and `resume=true`) can distinguish them.
+
+```bash
+# 13-channel run on EuroSAT with a pretrained timm ResNet-18
+torchgeo-bench run model=timm/resnet18 dataset.names=[m-eurosat] dataset.bands=all
+```
+
+**Model compatibility**:
+
+- **timm models** rebuild their input convolution for any `num_channels`
+  (averaging/replicating pretrained 3-channel weights), so any `model=timm/<name>`
+  works with `bands=all` out of the box.
+- **RCF** is band-agnostic.
+- **torchgeo RGB-only wrappers** (`tgeo_resnet18_*`, `scalemae_large_fmow`,
+  `earthloc_*`) load fixed-channel pretrained weights and currently do not
+  adapt to non-RGB inputs — see
+  [#16](https://github.com/torchgeo/torchgeo-bench/issues/16).
+- **DOFA** accepts variable channels via wavelength tokens but the current
+  wrapper hard-codes Sentinel-2 RGB wavelengths; see
+  [#15](https://github.com/torchgeo/torchgeo-bench/issues/15).
 
 ## Evaluation Protocol
 

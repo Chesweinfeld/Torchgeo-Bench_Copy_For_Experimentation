@@ -33,28 +33,23 @@ class EuroSAT(BenchDataset):
     supports_partitions = False
 
     # Band statistics mirror m-eurosat (computed from the same EuroSAT data).
+    # fmt: off
     bands = [
-        BandSpec(
-            "s2",
-            "coastal_aerosol",
-            "B01",
-            wavelength_um=0.443,
-            mean=1356.78,
-            std=246.34,
-        ),
-        BandSpec("s2", "blue", "B02", wavelength_um=0.49, mean=1123.14, std=334.28),
-        BandSpec("s2", "green", "B03", wavelength_um=0.56, mean=1057.28, std=392.23),
-        BandSpec("s2", "red", "B04", wavelength_um=0.665, mean=959.18, std=590.94),
-        BandSpec("s2", "red_edge_1", "B05", wavelength_um=0.705, mean=1227.44, std=548.57),
-        BandSpec("s2", "red_edge_2", "B06", wavelength_um=0.74, mean=2076.63, std=843.08),
-        BandSpec("s2", "red_edge_3", "B07", wavelength_um=0.783, mean=2463.43, std=1071.73),
-        BandSpec("s2", "nir", "B08", wavelength_um=0.842, mean=2390.32, std=1106.87),
-        BandSpec("s2", "water_vapour", "B09", wavelength_um=0.945, mean=12.33, std=5.08),
-        BandSpec("s2", "swir_cirrus", "B10", wavelength_um=1.375, mean=1861.29, std=963.03),
-        BandSpec("s2", "swir_1", "B11", wavelength_um=1.61, mean=1138.94, std=742.79),
-        BandSpec("s2", "swir_2", "B12", wavelength_um=2.19, mean=2699.78, std=1215.04),
-        BandSpec("s2", "red_edge_4", "B8A", wavelength_um=0.865, mean=761.55, std=404.41),
+        BandSpec("s2", "coastal_aerosol", "B01", mean=1354.41, std=245.718, min=816, max=17720, wavelength_um=0.443),
+        BandSpec("s2", "blue", "B02", mean=1118.24, std=333.009, min=0, max=28000, wavelength_um=0.49),
+        BandSpec("s2", "green", "B03", mean=1042.93, std=395.094, min=0, max=28000, wavelength_um=0.56),
+        BandSpec("s2", "red", "B04", mean=947.627, std=593.752, min=0, max=28000, wavelength_um=0.665),
+        BandSpec("s2", "red_edge_1", "B05", mean=1199.47, std=566.418, min=174, max=23381, wavelength_um=0.705),
+        BandSpec("s2", "red_edge_2", "B06", mean=1999.79, std=861.185, min=153, max=27791, wavelength_um=0.74),
+        BandSpec("s2", "red_edge_3", "B07", mean=2369.22, std=1086.63, min=128, max=28001, wavelength_um=0.783),
+        BandSpec("s2", "nir", "B08", mean=2296.83, std=1117.98, min=0, max=28002, wavelength_um=0.842),
+        BandSpec("s2", "water_vapour", "B09", mean=732.084, std=404.921, min=40, max=15384, wavelength_um=0.945),
+        BandSpec("s2", "swir_cirrus", "B10", mean=12.1133, std=4.7759, min=1, max=183, wavelength_um=1.375),
+        BandSpec("s2", "swir_1", "B11", mean=1819.01, std=1002.59, min=5, max=24704, wavelength_um=1.61),
+        BandSpec("s2", "swir_2", "B12", mean=1118.92, std=761.305, min=1, max=22210, wavelength_um=2.19),
+        BandSpec("s2", "red_edge_4", "B8A", mean=2594.14, std=1231.59, min=91, max=28000, wavelength_um=0.865),
     ]
+    # fmt: on
 
     @classmethod
     def data_root(cls) -> Path:

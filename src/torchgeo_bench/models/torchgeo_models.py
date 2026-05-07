@@ -75,11 +75,7 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
         transform = transform()
 
     from torchvision.transforms import Normalize as NormalizeV1
-
-    try:
-        from torchvision.transforms.v2 import Normalize as NormalizeV2
-    except ImportError:
-        NormalizeV2 = NormalizeV1  # type: ignore[misc,assignment]
+    from torchvision.transforms.v2 import Normalize as NormalizeV2
 
     norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
     if not norms:

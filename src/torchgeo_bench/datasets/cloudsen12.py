@@ -14,17 +14,19 @@ class CloudSEN12(_V2Dataset):
     rgb_bands = ["b04", "b03", "b02"]
     split_sizes = {"train": 4000, "val": 535, "test": 975}
 
+    # fmt: off
     bands = [
-        BandSpec("s2", "b01", "B01", wavelength_um=0.443, mean=2030.2444, std=2723.436),
-        BandSpec("s2", "b02", "B02", wavelength_um=0.49, mean=2074.8171, std=2691.3027),
-        BandSpec("s2", "b03", "B03", wavelength_um=0.56, mean=2209.8074, std=2539.9136),
-        BandSpec("s2", "b04", "B04", wavelength_um=0.665, mean=2247.9275, std=2538.5208),
-        BandSpec("s2", "b05", "B05", wavelength_um=0.705, mean=2589.5935, std=2504.3284),
-        BandSpec("s2", "b06", "B06", wavelength_um=0.74, mean=3103.5212, std=2241.7446),
-        BandSpec("s2", "b07", "B07", wavelength_um=0.783, mean=3277.9094, std=2145.6677),
-        BandSpec("s2", "b08", "B08", wavelength_um=0.842, mean=3331.6318, std=2176.9978),
-        BandSpec("s2", "b8a", "B8A", wavelength_um=0.865, mean=3377.5447, std=2066.7637),
-        BandSpec("s2", "b09", "B09", wavelength_um=0.945, mean=4038.1931, std=3083.1799),
-        BandSpec("s2", "b11", "B11", wavelength_um=1.61, mean=2448.748, std=1595.0652),
-        BandSpec("s2", "b12", "B12", wavelength_um=2.19, mean=1907.7285, std=1474.1177),
+        BandSpec("s2", "b01", "B01", mean=1973.24, std=2704.21, min=0, max=26044, wavelength_um=0.443),
+        BandSpec("s2", "b02", "B02", mean=2011.85, std=2650.55, min=0, max=25520, wavelength_um=0.49),
+        BandSpec("s2", "b03", "B03", mean=2148.43, std=2500.88, min=0, max=22800, wavelength_um=0.56),
+        BandSpec("s2", "b04", "B04", mean=2182.13, std=2500.84, min=0, max=20816, wavelength_um=0.665),
+        BandSpec("s2", "b05", "B05", mean=2526.47, std=2472.63, min=0, max=19952, wavelength_um=0.705),
+        BandSpec("s2", "b06", "B06", mean=3055.09, std=2212.44, min=0, max=19140, wavelength_um=0.74),
+        BandSpec("s2", "b07", "B07", mean=3239.42, std=2124.23, min=0, max=18724, wavelength_um=0.783),
+        BandSpec("s2", "b08", "B08", mean=3293.5, std=2151.72, min=0, max=18416, wavelength_um=0.842),
+        BandSpec("s2", "b8a", "B8A", mean=3347.9, std=2049.76, min=0, max=18096, wavelength_um=0.865),
+        BandSpec("s2", "b09", "B09", mean=4046.78, std=3147.31, min=0, max=17844, wavelength_um=0.945),
+        BandSpec("s2", "b11", "B11", mean=2443.39, std=1583.54, min=0, max=15948, wavelength_um=1.61),
+        BandSpec("s2", "b12", "B12", mean=1894.92, std=1464.28, min=0, max=16124, wavelength_um=2.19),
     ]
+    # fmt: on

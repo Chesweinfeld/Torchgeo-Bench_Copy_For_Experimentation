@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
+import geobench_v2.datasets as _gb_v2
 from torch.utils.data import Dataset
 
 from .base import BenchDataset
@@ -17,14 +18,6 @@ from .base import BenchDataset
 logger = logging.getLogger(__name__)
 
 V2_ROOT = Path("data/geobenchv2")
-
-try:
-    import geobench_v2.datasets as _gb_v2
-except ImportError as exc:  # pragma: no cover - exercised only in stripped envs
-    _gb_v2 = None
-    _GB_V2_IMPORT_ERROR: ImportError | None = exc
-else:
-    _GB_V2_IMPORT_ERROR = None
 
 
 # Map dataset name → upstream class name on ``geobench_v2.datasets``.
@@ -55,19 +48,7 @@ def list_v2_datasets() -> list[str]:
 
 
 def _resolve_class(dataset_name: str) -> type[Dataset]:
-    if _gb_v2 is None:
-        raise ImportError(
-            "geobench_v2 is required to load GeoBench V2 datasets. "
-            "Install it with `pip install geobenchv2>=0.9`."
-        ) from _GB_V2_IMPORT_ERROR
-    class_name = _V2_REGISTRY[dataset_name]
-    cls = getattr(_gb_v2, class_name, None)
-    if cls is None:
-        raise ImportError(
-            f"geobench_v2.datasets does not expose '{class_name}'. "
-            "Is your geobench_v2 version compatible with torchgeo-bench?"
-        )
-    return cls
+    return getattr(_gb_v2, _V2_REGISTRY[dataset_name])
 
 
 class GeoBenchv2(Dataset):

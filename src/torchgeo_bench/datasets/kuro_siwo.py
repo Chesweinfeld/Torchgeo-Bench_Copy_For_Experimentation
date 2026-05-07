@@ -21,11 +21,13 @@ class KuroSiwo(_V2Dataset):
     rgb_bands = ["vv", "vh"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
 
+    # fmt: off
     bands = [
-        BandSpec("sar", "vv", "vv", mean=0.0953, std=0.0427),
-        BandSpec("sar", "vh", "vh", mean=0.0264, std=0.0215),
-        BandSpec("dem", "dem", "dem", mean=93.4313, std=1410.8382),
+        BandSpec("sar", "vv", "vv", mean=0.1347, std=1.0677, min=0, max=2550.89),
+        BandSpec("sar", "vh", "vh", mean=0.0273, std=0.1723, min=0, max=530.453),
+        BandSpec("dem", "dem", "dem", mean=146.235, std=465.777, min=-32768, max=1690.83),
     ]
+    # fmt: on
 
     def canonicalize_sample(self, sample: dict) -> dict:
         """Squeeze the (C, T, H, W) tensor to (C, H, W) by keeping post-flood."""

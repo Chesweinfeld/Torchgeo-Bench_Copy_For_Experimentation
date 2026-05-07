@@ -19,6 +19,8 @@ class CaFFe(_V2Dataset):
     rgb_bands = ["gray"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
 
+    # fmt: off
     bands = [
-        BandSpec("aerial", "gray", "gray", mean=62.6825, std=79.8002),
+        BandSpec("aerial", "gray", "gray", mean=68.4868, std=82.7774, min=0, max=255),
     ]
+    # fmt: on

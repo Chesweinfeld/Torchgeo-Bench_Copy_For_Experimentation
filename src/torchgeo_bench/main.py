@@ -15,6 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import accuracy_score, average_precision_score
 from torch.utils.data import DataLoader
+from torchgeo.datasets.errors import DatasetNotFoundError
 from tqdm import tqdm
 
 from torchgeo_bench.datasets import (
@@ -28,11 +29,6 @@ from torchgeo_bench.models.interface import BenchModel
 from torchgeo_bench.segmentation_probe import SegmentationProbe
 from torchgeo_bench.segmentation_task import SegmentationSolver
 from torchgeo_bench.utils import extract_features
-
-try:
-    from torchgeo.datasets.errors import DatasetNotFoundError
-except ImportError:  # pragma: no cover - older torchgeo versions
-    DatasetNotFoundError = FileNotFoundError  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +52,31 @@ def _expand_dataset_list(names: str | Sequence[str]) -> list[str]:
             return list_datasets()
         return [n.strip() for n in names.split(",") if n.strip()]
     return list(names)
+
+
+def _normalize_bands_value(bands: object) -> str:
+    """Canonicalize the ``cfg.dataset.bands`` value for logging/CSV/resume.
+
+    Hydra hands us either ``"rgb"``/``"all"``, an explicit list (``ListConfig``
+    or ``list[str]``), or ``None``.  Reduce all of those to a stable string so
+    that the resume key and the CSV column are comparable across runs.
+
+    Args:
+        bands: The raw ``cfg.dataset.bands`` value.
+
+    Returns:
+        A stable string representation: ``"rgb"``, ``"all"``, or a
+        comma-joined explicit band list (e.g. ``"red,green,blue,nir"``).
+    """
+    if bands is None:
+        return "all"
+    if isinstance(bands, str):
+        return bands
+    try:
+        items = [str(b) for b in bands]
+    except TypeError:
+        return str(bands)
+    return ",".join(items)
 
 
 def bootstrap_accuracy(
@@ -142,6 +163,7 @@ class EvaluationResult:
     image_size: int | None
     interpolation: str
     partition: str
+    bands: str
     c_range_start: float
     c_range_stop: float
     c_range_num: int
@@ -399,35 +421,32 @@ def main(cfg: DictConfig) -> None:
     c_values_list = [float(v) for v in c_values.tolist()]
 
     # Load existing results if resume mode is enabled
-    completed_runs: set[tuple[str, str, str, str, str, str, str, str]] = set()
+    completed_runs: set[tuple[str, ...]] = set()
     if cfg.resume and os.path.exists(output_path):
-        try:
-            existing_df = pd.read_csv(cfg.output)
-            # Track (dataset, method, model, name, normalization, image_size, interpolation, partition) tuples
-            for _, row in existing_df.iterrows():
-                completed_runs.add(
-                    (
-                        str(row.get("dataset", "")),
-                        str(row.get("method", "")),
-                        str(row.get("model", "")),
-                        str(row.get("name", "")),
-                        str(row.get("normalization", "")),
-                        str(row.get("image_size", "")),
-                        str(row.get("interpolation", "")),
-                        str(row.get("partition", "")),
-                    )
+        existing_df = pd.read_csv(cfg.output)
+        # Track (dataset, method, model, name, normalization, image_size,
+        # interpolation, partition, bands) tuples
+        for _, row in existing_df.iterrows():
+            completed_runs.add(
+                (
+                    str(row.get("dataset", "")),
+                    str(row.get("method", "")),
+                    str(row.get("model", "")),
+                    str(row.get("name", "")),
+                    str(row.get("normalization", "")),
+                    str(row.get("image_size", "")),
+                    str(row.get("interpolation", "")),
+                    str(row.get("partition", "")),
+                    str(row.get("bands", "")),
                 )
-            logger.info(
-                f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}"
             )
-            logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
-        except Exception as e:
-            logger.warning(f"Could not load existing results for resume: {e}")
-            completed_runs = set()
+        logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
+        logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
     # Model can override dataset normalization (e.g., torchgeo models that
     # need specific preprocessing).  Fall back to dataset.normalization.
     normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
+    bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
         # Resolve metadata via the BenchDataset registry (no I/O).
@@ -444,6 +463,7 @@ def main(cfg: DictConfig) -> None:
             str(getattr(cfg.dataset, "image_size", None)),
             getattr(cfg.dataset, "interpolation", "bicubic"),
             cfg.dataset.partition,
+            bands_value,
         )
 
         # Check resume for standard methods
@@ -519,6 +539,7 @@ def main(cfg: DictConfig) -> None:
             "image_size": getattr(cfg.dataset, "image_size", None),
             "interpolation": getattr(cfg.dataset, "interpolation", "bicubic"),
             "partition": cfg.dataset.partition,
+            "bands": bands_value,
             "c_range_start": c_start,
             "c_range_stop": c_stop,
             "c_range_num": c_num,

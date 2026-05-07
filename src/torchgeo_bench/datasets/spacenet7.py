@@ -17,8 +17,10 @@ class SpaceNet7(_V2Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 3500, "val": 652, "test": 1152}
 
+    # fmt: off
     bands = [
-        BandSpec("planet", "red", "red", mean=116.9447, std=61.6558),
-        BandSpec("planet", "green", "green", mean=103.5589, std=49.649),
-        BandSpec("planet", "blue", "blue", mean=76.7743, std=45.8807),
+        BandSpec("planet", "red", "red", mean=117.85, std=61.9829, min=0, max=255),
+        BandSpec("planet", "green", "green", mean=104.531, std=49.7879, min=0, max=255),
+        BandSpec("planet", "blue", "blue", mean=77.561, std=46.01, min=0, max=255),
     ]
+    # fmt: on

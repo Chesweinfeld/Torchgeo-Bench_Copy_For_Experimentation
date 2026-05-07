@@ -19,14 +19,16 @@ class SpaceNet2(_V2Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 5186, "val": 1461, "test": 2961}
 
+    # fmt: off
     bands = [
-        BandSpec("worldview", "coastal", "coastal", mean=298.7281, std=106.9792),
-        BandSpec("worldview", "blue", "blue", mean=358.0099, std=148.1868),
-        BandSpec("worldview", "green", "green", mean=464.5104, std=224.4095),
-        BandSpec("worldview", "yellow", "yellow", mean=419.9473, std=225.7901),
-        BandSpec("worldview", "red", "red", mean=333.6004, std=194.0233),
-        BandSpec("worldview", "red_edge", "red_edge", mean=408.6689, std=208.4557),
-        BandSpec("worldview", "nir1", "nir1", mean=475.0842, std=234.7585),
-        BandSpec("worldview", "nir2", "nir2", mean=362.3487, std=193.2321),
-        BandSpec("pan", "pan", "pan", mean=468.574, std=260.8954),
+        BandSpec("worldview", "coastal", "coastal", mean=296.081, std=107.482, min=0, max=1227),
+        BandSpec("worldview", "blue", "blue", mean=357.957, std=151.518, min=0, max=1570),
+        BandSpec("worldview", "green", "green", mean=465.239, std=229.433, min=0, max=2047),
+        BandSpec("worldview", "yellow", "yellow", mean=417.796, std=230.014, min=0, max=2047),
+        BandSpec("worldview", "red", "red", mean=334.455, std=198.499, min=0, max=1933),
+        BandSpec("worldview", "red_edge", "red_edge", mean=409.533, std=212.211, min=0, max=2047),
+        BandSpec("worldview", "nir1", "nir1", mean=481.216, std=240.981, min=0, max=2047),
+        BandSpec("worldview", "nir2", "nir2", mean=364.308, std=196.878, min=0, max=2047),
+        BandSpec("pan", "pan", "pan", mean=469.092, std=266.975, min=0, max=2047),
     ]
+    # fmt: on

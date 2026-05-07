@@ -19,12 +19,14 @@ class FieldsOfTheWorld(_V2Dataset):
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 4000, "val": 1000, "test": 2000}
 
+    # fmt: off
     bands = [
-        BandSpec("s2", "red", "red", mean=862.084, std=681.1667),
-        BandSpec("s2", "green", "green", mean=853.3895, std=508.6401),
-        BandSpec("s2", "blue", "blue", mean=592.008, std=454.0239),
-        BandSpec("s2", "nir", "nir", mean=2984.3018, std=1043.6527),
+        BandSpec("s2", "red", "red", mean=937.509, std=807.662, min=0, max=17499),
+        BandSpec("s2", "green", "green", mean=923.717, std=677.861, min=0, max=17653),
+        BandSpec("s2", "blue", "blue", mean=678.358, std=645.035, min=0, max=20214),
+        BandSpec("s2", "nir", "nir", mean=3028.48, std=1037.38, min=0, max=17200),
     ]
+    # fmt: on
 
     def canonicalize_sample(self, sample: dict) -> dict:
         """Pick the later acquisition (``image_b``) and surface it as ``image``."""

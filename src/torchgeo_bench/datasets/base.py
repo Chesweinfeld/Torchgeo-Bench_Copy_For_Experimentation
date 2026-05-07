@@ -34,18 +34,22 @@ class BandSpec:
         source_name: Band key as it appears in the data files. For V1 HDF5
             files this is the long form (``"04 - Red"``); for V2 datasets
             this is typically the uppercase band code (``"B04"``).
+        mean: Train-split mean pixel value (raw units, no normalization).
+        std: Train-split standard deviation.
+        min: Train-split minimum pixel value.
+        max: Train-split maximum pixel value.
         wavelength_um: Approximate centre wavelength in micrometres.
             ``None`` for non-optical bands (SAR, DEM, elevation).
-        mean: Dataset-level mean pixel value.
-        std: Dataset-level standard deviation.
     """
 
     sensor: str
     name: str
     source_name: str
+    mean: float
+    std: float
+    min: float
+    max: float
     wavelength_um: float | None = None
-    mean: float = 0.0
-    std: float = 1.0
 
 
 class BenchDataset(ABC):
