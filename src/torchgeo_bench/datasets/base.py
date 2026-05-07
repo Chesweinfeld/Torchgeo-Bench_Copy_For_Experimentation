@@ -127,9 +127,11 @@ class BenchDataset(ABC):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-        normalize: str = "mean_stdev",
     ) -> Dataset:
         """Return a PyTorch :class:`~torch.utils.data.Dataset` for a split.
+
+        Datasets always emit raw float32 values; normalization is the
+        :class:`~torchgeo_bench.models.interface.BenchModel`'s job.
 
         Args:
             split: ``"train"``, ``"val"``, or ``"test"``.
@@ -138,8 +140,6 @@ class BenchDataset(ABC):
                 ``False``.
             bands: Tuple of canonical band names to load. ``None`` loads all.
             transform: Optional sample transform callable.
-            normalize: Normalization strategy — ``"mean_stdev"``,
-                ``"min_max"``, ``"percentile_2_98"``, or ``"none"``.
         """
 
     def get_dataloader(

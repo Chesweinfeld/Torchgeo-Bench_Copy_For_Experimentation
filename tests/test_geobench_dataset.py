@@ -103,32 +103,41 @@ class TestAllDatasets:
         _ = dataset[len(dataset) - 1]
 
 
-class TestNormalization:
-    """Test different normalization methods."""
+class TestRawEmission:
+    """Datasets always emit raw float32 values; normalization moved to BenchModel."""
 
-    @pytest.mark.parametrize(
-        "normalize,expected_range",
-        [
-            ("mean_stdev", (-5, 5)),
-            ("min_max", (0, 1)),
-            ("none", (0, 30000)),
-        ],
-    )
-    def test_normalization_methods(self, geobench_root, normalize, expected_range, small_partition):
-        """Different normalization methods produce expected value ranges."""
+    def test_raw_pixel_range(self, geobench_root, small_partition):
+        """Per-band values are raw uint16-ish DN, not normalized to [-5, 5] or [0, 1]."""
         bench = get_bench_dataset_class("m-eurosat")()
         dataset = bench.get_dataset(
             "train",
             partition=small_partition,
             bands=tuple(bench.rgb_bands),
-            normalize=normalize,
         )
 
         sample = dataset[0]
         img = sample["image"]
-        min_val, max_val = expected_range
-        assert img.min() >= min_val - 1.0, f"normalize={normalize}: min {img.min()} < {min_val}"
-        assert img.max() <= max_val + 1.0, f"normalize={normalize}: max {img.max()} > {max_val}"
+        assert img.dtype.is_floating_point
+        # Raw Sentinel-2 reflectance DN values are large.
+        assert img.max() > 100.0, (
+            f"Expected raw S2 magnitudes (max > 100), got max={img.max().item():.2f}; "
+            "the dataset may still be normalizing internally."
+        )
+
+    def test_normalize_arg_deprecation(self, geobench_root, small_partition):
+        """Passing the legacy `normalize` arg emits a DeprecationWarning."""
+        del small_partition
+        from torchgeo_bench.datasets.geobench_v1 import GeoBenchv1
+
+        with pytest.warns(DeprecationWarning, match="normalize is deprecated"):
+            GeoBenchv1(
+                root=geobench_root,
+                dataset_name="m-eurosat",
+                split="train",
+                partition="0.01x_train",
+                bands=("04 - Red", "03 - Green", "02 - Blue"),
+                normalize=True,
+            )
 
 
 class TestDataLoader:

@@ -443,9 +443,10 @@ def main(cfg: DictConfig) -> None:
         logger.info(f"Resume mode: Found {len(completed_runs)} existing results in {cfg.output}")
         logger.info("Will skip already-computed (dataset, method, model, config) combinations.")
 
-    # Model can override dataset normalization (e.g., torchgeo models that
-    # need specific preprocessing).  Fall back to dataset.normalization.
-    normalization = getattr(cfg.model, "normalization", None) or cfg.dataset.normalization
+    # Datasets always emit raw values; the model owns normalization.  The
+    # CSV column is kept for back-compat but pinned to a literal so old/new
+    # rows are clearly not comparable across the model-normalization refactor.
+    normalization = "raw"
     bands_value = _normalize_bands_value(getattr(cfg.dataset, "bands", "rgb"))
 
     for ds_name in tqdm(dataset_names, desc="Datasets"):
@@ -478,7 +479,6 @@ def main(cfg: DictConfig) -> None:
                 dataset_name=ds_name,
                 partition_name=cfg.dataset.partition,
                 batch_size=cfg.dataset.batch_size,
-                normalization=normalization,
                 return_val=True,
                 image_size=getattr(cfg.dataset, "image_size", None),
                 interpolation=getattr(cfg.dataset, "interpolation", "bicubic"),
@@ -498,35 +498,39 @@ def main(cfg: DictConfig) -> None:
         is_multilabel = ds_cls.multilabel
         num_classes = ds_cls.num_classes
 
+        # Build the BandSpec list that matches the actual loaded channels.
+        bench_for_bands = ds_cls()
+        bands_resolved = (
+            tuple(bench_for_bands.rgb_bands)
+            if cfg.dataset.bands == "rgb"
+            else None
+            if cfg.dataset.bands in ("all", None)
+            else tuple(cfg.dataset.bands)
+        )
+        bands_list = bench_for_bands._select_band_specs(bands_resolved)
+        assert len(bands_list) == num_channels, (
+            f"BandSpec count {len(bands_list)} != tensor channel count {num_channels} "
+            f"for dataset {ds_name}; sample-level canonicalization may have changed shape."
+        )
+
         # Resume check for segmentation
         if is_segmentation and cfg.resume and seg_key in completed_runs:
             if cfg.verbose:
                 logger.info(f"[{ds_name}] Skipping segmentation (already computed)")
             continue
 
-        # Instantiate Backbone
-        model_cfg = OmegaConf.merge(cfg.model, {"num_channels": num_channels})
-
-        needs_dataset = (
+        # Instantiate Backbone — pass `bands` post-hoc so Hydra never tries
+        # to OmegaConf-ify the BandSpec list.  `_convert_="object"` keeps
+        # the rest of the model config as plain Python primitives.
+        is_rcf_empirical = (
             hasattr(cfg.model, "mode")
             and str(cfg.model._target_).endswith("RCFBench")
             and str(cfg.model.mode) == "empirical"
         )
-        if needs_dataset:
-            target_path: str = cfg.model._target_
-            module_name, class_name = target_path.rsplit(".", 1)
-            module = __import__(module_name, fromlist=[class_name])
-            model = getattr(module, class_name)(
-                num_channels=num_channels,
-                features=cfg.model.features,
-                kernel_size=cfg.model.kernel_size,
-                mode=cfg.model.mode,
-                stats_mode=cfg.model.stats_mode,
-                seed=getattr(cfg.model, "seed", None),
-                dataset=train_dataset,
-            )
-        else:
-            model: BenchModel = instantiate(model_cfg)
+        instantiate_kwargs: dict = {"bands": bands_list, "_convert_": "object"}
+        if is_rcf_empirical:
+            instantiate_kwargs["dataset"] = train_dataset
+        model: BenchModel = instantiate(cfg.model, **instantiate_kwargs)
         model.to(device).eval()
 
         # Shared Result metadata

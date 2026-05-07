@@ -3,7 +3,6 @@
 # Model: mobilenetv3_small_100
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: mobilenetv3_small_100
 pretrained: true
 global_pool: avg

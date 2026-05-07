@@ -2,7 +2,6 @@
 # Feature dimension: 768
 
 _target_: torchgeo_bench.models.TorchGeoSwinBench
-num_channels: 3
 factory: swin_v2_t
 weights_class: Swin_V2_T_Weights
 weights_member: SENTINEL2_MI_RGB_SATLAS

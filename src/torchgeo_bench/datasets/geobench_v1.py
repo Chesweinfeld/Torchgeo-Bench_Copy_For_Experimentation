@@ -8,6 +8,7 @@ HDF5 files using the partition JSON files distributed alongside them.
 import io
 import json
 import pickle
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
@@ -81,8 +82,11 @@ class GeoBenchv1(Dataset):
         bands: Tuple of source band names (``"04 - Red"``, etc.) to load. If
             ``None``, loads all bands present in the first sample.
         transform: Optional callable applied to each sample dict.
-        normalize: ``True`` (mean/std), ``False`` (raw int16), ``"min_max"``,
-            or ``"percentile_2_98"``.
+        normalize: **Deprecated** — kept for API back-compat for one cycle.
+            Always ignored: this class now emits raw float32 values.  Anything
+            other than ``False``/``None``/``"none"`` triggers a
+            :class:`DeprecationWarning`.  Per-channel normalization belongs on
+            :class:`~torchgeo_bench.models.interface.BenchModel`.
     """
 
     def __init__(
@@ -93,7 +97,7 @@ class GeoBenchv1(Dataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: object = None,
-        normalize: bool | str = True,
+        normalize: bool | str | None = None,
     ):
         super().__init__()
         self.root = Path(root)
@@ -101,7 +105,14 @@ class GeoBenchv1(Dataset):
         self.split = split
         self.partition = partition
         self.transform = transform
-        self.normalize = normalize
+
+        if normalize not in (None, False, "none"):
+            warnings.warn(
+                "GeoBenchv1.normalize is deprecated and ignored: this class emits "
+                "raw values; per-channel normalization is now done by BenchModel.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         self.dataset_dir = self.root / dataset_name
         if not self.dataset_dir.exists():
@@ -174,21 +185,6 @@ class GeoBenchv1(Dataset):
 
         image = np.stack(bands_data, axis=0).astype(np.float32)
 
-        if self.normalize:
-            stats = self.band_stats
-            for i, band_name in enumerate(self.band_names):
-                if band_name not in stats:
-                    continue
-                bs = stats[band_name]
-                if self.normalize == "min_max":
-                    image[i] = (image[i] - bs.min) / (bs.max - bs.min + 1e-8)
-                elif self.normalize == "percentile_2_98":
-                    if bs.percentile_2 is not None and bs.percentile_98 is not None:
-                        p2, p98 = bs.percentile_2, bs.percentile_98
-                        image[i] = np.clip((image[i] - p2) / (p98 - p2 + 1e-8), 0.0, 1.0)
-                else:
-                    image[i] = (image[i] - bs.mean) / (bs.std + 1e-8)
-
         image_t = torch.from_numpy(image)
         label_arr = np.asarray(label)
         label_t: torch.Tensor
@@ -234,17 +230,8 @@ class _V1Dataset(BenchDataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-        normalize: str = "mean_stdev",
     ) -> Dataset:
-        """Return a :class:`GeoBenchv1` for the given split."""
-        norm_arg: bool | str
-        if normalize == "mean_stdev":
-            norm_arg = True
-        elif normalize == "none":
-            norm_arg = False
-        else:
-            norm_arg = normalize
-
+        """Return a :class:`GeoBenchv1` for the given split (raw values)."""
         v1_split: Literal["train", "valid", "test"] = "valid" if split == "val" else split  # type: ignore[assignment]
         source_bands = tuple(spec.source_name for spec in self._select_band_specs(bands))
         return GeoBenchv1(
@@ -253,6 +240,5 @@ class _V1Dataset(BenchDataset):
             split=v1_split,
             partition=partition,
             bands=source_bands,
-            normalize=norm_arg,
             transform=transform,
         )

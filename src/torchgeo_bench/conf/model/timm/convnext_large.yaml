@@ -1,5 +1,4 @@
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: convnext_large
 pretrained: true
 global_pool: avg

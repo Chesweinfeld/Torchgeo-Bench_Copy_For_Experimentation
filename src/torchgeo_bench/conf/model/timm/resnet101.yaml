@@ -3,7 +3,6 @@
 # Model: resnet101
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: resnet101
 pretrained: true
 global_pool: avg

@@ -2,7 +2,6 @@
 # Feature dimension: 768
 
 _target_: torchgeo_bench.models.TorchGeoDOFABench
-num_channels: 3
 factory: dofa_base_patch16_224
 weights_class: DOFABase16_Weights
 weights_member: DOFA_MAE

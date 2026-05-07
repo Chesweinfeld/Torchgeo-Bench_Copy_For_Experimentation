@@ -3,7 +3,6 @@
 # Model: vgg16
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: vgg16
 pretrained: true
 global_pool: avg

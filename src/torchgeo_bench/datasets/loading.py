@@ -154,7 +154,6 @@ def get_datasets(
     dataset_name: str = "m-forestnet",
     partition_name: str = "default",
     batch_size: int = 32,
-    normalization: str = "mean_stdev",
     return_val: bool = False,
     num_workers: int = 8,
     image_size: int | None = None,
@@ -163,13 +162,14 @@ def get_datasets(
 ) -> tuple:
     """Load benchmark dataset splits and dataloaders.
 
+    Datasets always emit raw float32 values; per-channel normalization is
+    the model's responsibility (see :class:`~torchgeo_bench.models.interface.BenchModel`).
+
     Args:
         dataset_name: Identifier registered in :data:`_REGISTRY`.
         partition_name: Partition name (only honoured by datasets where
             :attr:`~.base.BenchDataset.supports_partitions` is ``True``).
         batch_size: Batch size for the returned dataloaders.
-        normalization: Normalization strategy (``"mean_stdev"``,
-            ``"min_max"``, ``"percentile_2_98"``, or ``"none"``).
         return_val: If ``True``, also return a validation dataloader.
         num_workers: Number of dataloader worker processes.
         image_size: If set, resize images (and masks, with nearest) to this
@@ -213,7 +213,7 @@ def get_datasets(
     transform = _make_resize_transform(image_size, interpolation)
     train_partition = partition_name if bench.supports_partitions else "default"
 
-    common = {"bands": bands_tuple, "transform": transform, "normalize": normalization}
+    common = {"bands": bands_tuple, "transform": transform}
     train_ds = bench.get_dataset("train", partition=train_partition, **common)
     val_ds = bench.get_dataset("val", partition="default", **common)
     test_ds = bench.get_dataset("test", partition="default", **common)

@@ -2,7 +2,6 @@
 # Feature dimension: 2048
 
 _target_: torchgeo_bench.models.TorchGeoResNetBench
-num_channels: 3
 factory: resnet50
 weights_class: ResNet50_Weights
 weights_member: FMOW_RGB_GASSL

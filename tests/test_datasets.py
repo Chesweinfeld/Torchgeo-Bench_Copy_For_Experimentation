@@ -82,26 +82,21 @@ class TestGetDatasetsFunction:
         assert train_batch["label"].min() >= 0
         assert train_batch["label"].max() < expected_classes
 
-    @pytest.mark.parametrize(
-        "normalization",
-        ["mean_stdev", "min_max", "none"],
-    )
-    def test_different_normalizations(self, geobench_root, normalization):
-        """Test different normalization methods."""
+    def test_raw_emission(self, geobench_root):
+        """Datasets always emit raw float32 (normalization moved to BenchModel)."""
         result = get_datasets(
             dataset_name="m-eurosat",
             partition_name="0.01x_train",
             batch_size=4,
-            normalization=normalization,
             return_val=False,
         )
 
         train_dataset, train_loader, test_loader = result  # type: ignore[misc]
         batch = next(iter(train_loader))
 
-        # Just verify we can get data without errors
-        assert batch["image"].shape[0] > 0
         assert batch["image"].dtype == torch.float32
+        # Raw S2 reflectance DN values are large (well above the [-5, 5] z-score range).
+        assert batch["image"].max().item() > 100.0
 
 
 class TestIntegrationWithBenchmark:

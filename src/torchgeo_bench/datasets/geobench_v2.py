@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 import geobench_v2.datasets as _gb_v2
+import torch.nn as nn
 from torch.utils.data import Dataset
 
 from .base import BenchDataset
@@ -155,10 +156,14 @@ class _V2Dataset(BenchDataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable | None = None,
-        normalize: str = "mean_stdev",
     ) -> Dataset:
-        """Return a :class:`GeoBenchv2` for the given split."""
-        del partition, normalize
+        """Return a :class:`GeoBenchv2` for the given split (raw values).
+
+        Forces ``data_normalizer=nn.Identity`` so the upstream class emits
+        raw sensor values; per-channel normalization belongs on
+        :class:`~torchgeo_bench.models.interface.BenchModel`.
+        """
+        del partition
         band_order = self.build_band_order(bands)
         canonicalize = self.canonicalize_sample
 
@@ -167,7 +172,7 @@ class _V2Dataset(BenchDataset):
                 sample = transform(sample)
             return canonicalize(sample)
 
-        kwargs: dict[str, object] = {}
+        kwargs: dict[str, object] = {"data_normalizer": nn.Identity}
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
 

@@ -3,7 +3,6 @@
 # Model: convnext_tiny
 
 _target_: torchgeo_bench.models.TimmPatchBenchModel
-num_channels: 3
 model_name: convnext_tiny
 pretrained: true
 global_pool: avg
