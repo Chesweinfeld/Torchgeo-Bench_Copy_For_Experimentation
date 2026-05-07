@@ -1,8 +1,9 @@
 """Benchmark model implementations and exports."""
 
-from .bench_models import ImageStatsBench, RCFBench
+from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
+from .rcf import RCFBench
 from .timm import TimmPatchBenchModel
 from .torchgeo_models import (
     TorchGeoDOFABench,

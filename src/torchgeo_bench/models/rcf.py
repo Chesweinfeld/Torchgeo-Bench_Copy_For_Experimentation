@@ -1,11 +1,23 @@
-"""Random Convolutional Features (RCF) model for the MOSAIKS method."""
+"""Random Convolutional Features (RCF) BenchModel and its underlying nn.Module.
+
+The :class:`RCF` ``nn.Module`` is a vendored copy of the MOSAIKS-style
+random / empirical convolutional feature extractor (originally adapted from
+``torchgeo.models.RCF``) with an added ``stats_mode`` knob for choosing
+which pooling statistics to concatenate.  It is module-private:
+:class:`RCFBench` is the only consumer.
+"""
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+from torch.utils.data import Dataset
 from torchgeo.datasets import NonGeoDataset
+
+from torchgeo_bench.datasets.base import BandSpec
+
+from .interface import BenchModel
 
 
 class RCF(nn.Module):
@@ -204,3 +216,76 @@ class RCF(nn.Module):
             return output
         else:
             raise ValueError(f"Unknown stats_mode: {self.stats_mode}")
+
+
+class _NormalizingDatasetView(Dataset):
+    """Wraps a benchmark dataset so ``__getitem__`` returns z-scored images.
+
+    Used by :class:`RCFBench` empirical mode so the patches sampled to seed
+    the ZCA-whitened filter bank live in the same distribution as the inputs
+    that :meth:`BenchModel.normalize_inputs` will produce at inference time.
+    """
+
+    def __init__(self, base: Dataset, mean: torch.Tensor, std: torch.Tensor) -> None:
+        self._base = base
+        # Per-channel (C, 1, 1) tensors for sample-level normalization.
+        self._mean = mean.detach().clone().view(-1, 1, 1).cpu().float()
+        self._std = std.detach().clone().clamp_min(1e-8).view(-1, 1, 1).cpu().float()
+
+    def __len__(self) -> int:
+        return len(self._base)  # type: ignore[arg-type]
+
+    def __getitem__(self, idx: int) -> dict:
+        sample = self._base[idx]
+        img = sample["image"].float()
+        sample = dict(sample)
+        sample["image"] = (img - self._mean) / self._std
+        return sample
+
+
+class RCFBench(BenchModel):
+    """Wrapper for the existing :class:`RCF` implementation.
+
+    Modes:
+
+    - ``mode="gaussian"``: filters are drawn from a Gaussian; default
+      :meth:`BenchModel.normalize_inputs` (per-channel z-score) is applied
+      to inference inputs.
+    - ``mode="empirical"``: filters are sampled from ``dataset``.  To keep
+      the filter bank and inference inputs in the same distribution, the
+      passed dataset is wrapped so its samples are pre-normalized with the
+      same per-channel z-score this :class:`RCFBench` will use at inference.
+    """
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        features: int = 512,
+        kernel_size: int = 3,
+        mode: str = "gaussian",
+        stats_mode: str = "mean",
+        seed: int | None = None,
+        dataset: NonGeoDataset | None = None,
+        **_kwargs,
+    ) -> None:
+        super().__init__(bands=bands)
+        if mode == "empirical" and dataset is not None:
+            dataset = _NormalizingDatasetView(dataset, self.input_mean, self.input_std)
+        self.rcf = RCF(
+            in_channels=self.num_channels,
+            features=features,
+            kernel_size=kernel_size,
+            mode=mode,
+            stats_mode=stats_mode,
+            seed=seed,
+            dataset=dataset,
+        )
+
+    def _forward_patch_features(
+        self,
+        images: torch.Tensor,
+        bboxes: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return RCF embeddings for already-normalized images."""
+        del bboxes
+        return self.rcf(images)
