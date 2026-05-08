@@ -382,6 +382,67 @@ def evaluate_segmentation(
 # ---------------------------------------------------------------------------
 
 
+def append_rows_atomic(path: str, rows: list[dict]) -> None:
+    """Append rows to a CSV atomically, with advisory file lock and schema healing.
+
+    Behavior:
+
+    - Empty/missing file: writes the header derived from ``rows`` and the rows.
+    - Existing file whose header matches ``rows[0]`` keys exactly: appends
+      rows without rewriting the header (fast path).
+    - Existing file with a different schema (e.g. ``EvaluationResult`` gained
+      a field since the file was first written): the file is rewritten with
+      the unioned schema so every value lives under a named column instead
+      of being silently stuffed into an unnamed position.
+
+    Args:
+        path: Output CSV path; created if missing.
+        rows: List of dicts to append.  All dicts should share the same keys.
+    """
+    if not rows:
+        return
+    df_local = pd.DataFrame(rows)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    with os.fdopen(fd, "r+", closefd=True) as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.seek(0, os.SEEK_END)
+            empty = f.tell() == 0
+            buf = io.StringIO()
+            if empty:
+                df_local.to_csv(buf, header=True, index=False)
+                f.write(buf.getvalue())
+            else:
+                f.seek(0)
+                existing_df = pd.read_csv(f)
+                if list(existing_df.columns) == list(df_local.columns):
+                    df_local.to_csv(buf, header=False, index=False)
+                    f.seek(0, os.SEEK_END)
+                    f.write(buf.getvalue())
+                else:
+                    extra = [c for c in existing_df.columns if c not in df_local.columns]
+                    ordered = list(df_local.columns) + extra
+                    combined = pd.concat(
+                        [existing_df, df_local], ignore_index=True, sort=False
+                    ).reindex(columns=ordered)
+                    logger.warning(
+                        "CSV schema drift detected at %s: existing columns %s, "
+                        "new columns %s. Rewriting with unioned schema %s.",
+                        path,
+                        list(existing_df.columns),
+                        list(df_local.columns),
+                        ordered,
+                    )
+                    f.seek(0)
+                    f.truncate()
+                    combined.to_csv(buf, header=True, index=False)
+                    f.write(buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     """Run the benchmark pipeline for all configured datasets and models."""
@@ -394,26 +455,6 @@ def main(cfg: DictConfig) -> None:
     # Output file path
     output_path = cfg.output
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
-    def _append_rows_atomic(path: str, rows: list[dict]) -> None:
-        """Append rows to CSV atomically with advisory file lock."""
-        if not rows:
-            return
-        df_local = pd.DataFrame(rows)
-        # Open file in read-write mode; create if not exists
-        fd = os.open(path, os.O_RDWR | os.O_CREAT)
-        with os.fdopen(fd, "r+", closefd=True) as f:
-            # Acquire exclusive lock
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            f.seek(0, os.SEEK_END)
-            empty = f.tell() == 0
-            # Prepare CSV in memory
-            buf = io.StringIO()
-            df_local.to_csv(buf, header=empty, index=False)
-            f.write(buf.getvalue())
-            f.flush()
-            os.fsync(f.fileno())
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     all_rows: list[dict] = []
     c_start, c_stop, c_num = cfg.eval.c_range
@@ -644,7 +685,7 @@ def main(cfg: DictConfig) -> None:
                     ).to_row()
                 )
 
-        _append_rows_atomic(output_path, all_rows)
+        append_rows_atomic(output_path, all_rows)
         all_rows.clear()
 
     logger.info(f"Benchmark complete. Results appended to {output_path}")
