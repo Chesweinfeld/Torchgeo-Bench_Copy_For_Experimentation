@@ -51,6 +51,8 @@ dependencies = [
 ]
 optional-dependencies.all = [
   "torchgeo-bench[dev]",
+  "torchgeo-bench[sam3]",
+  "torchgeo-bench[viz]",
 ]
 optional-dependencies.dev = [
   "mdformat>=0.7.22",
@@ -63,11 +65,21 @@ optional-dependencies.dev = [
 optional-dependencies.olmoearth = [
   "olmoearth-pretrain-minimal>=0.0.2",
 ]
+optional-dependencies.sam3 = [
+  "transformers>=4.50",
+]
+optional-dependencies.viz = [
+  "matplotlib>=3.5",
+  "pillow>=9",
+]
 urls.Documentation = "https://github.com/calebrob6/torchgeo-bench/blob/main/README.md"
 urls.Homepage = "https://github.com/calebrob6/torchgeo-bench"
 urls.Issues = "https://github.com/calebrob6/torchgeo-bench/issues"
 urls.Repository = "https://github.com/calebrob6/torchgeo-bench"
 scripts.torchgeo-bench = "torchgeo_bench.cli:main"
+
+[tool.hatch]
+build.targets.wheel.packages = [ "src/torchgeo_bench" ]
 
 [tool.ruff]
 target-version = "py312"
