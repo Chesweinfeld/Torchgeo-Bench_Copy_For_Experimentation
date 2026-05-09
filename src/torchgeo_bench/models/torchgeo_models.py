@@ -32,6 +32,7 @@ from torchvision.transforms.v2 import Normalize as NormalizeV2
 
 from torchgeo_bench.datasets.base import BandSpec
 
+from ._input_units import InputUnit
 from .interface import BenchModel
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,54 @@ def _resolve_torchgeo_weights(weights_class_name: str, weights_member: str):
     return member
 
 
+def _adapt_first_conv(model: nn.Module, attr_path: str, in_chans: int) -> None:
+    """Adapt ``model.<attr_path>`` (a ``Conv2d``) to ``in_chans`` input channels.
+
+    Reuses :func:`timm.models._manipulate.adapt_input_conv` when possible
+    (RGB-pretrained -> arbitrary in_chans).  For other shapes (e.g. 13ch
+    MoCo-MSI -> 3ch RGB) timm raises NotImplementedError; fall back to
+    averaging the pretrained weight to one channel and replicating with a
+    ``3 / in_chans`` scale to preserve activation magnitude.
+    """
+    from timm.models._manipulate import adapt_input_conv
+
+    parts = attr_path.split(".")
+    parent = model
+    for p in parts[:-1]:
+        parent = getattr(parent, p)
+    conv = getattr(parent, parts[-1])
+    if conv.in_channels == in_chans:
+        return
+
+    try:
+        new_weight = adapt_input_conv(in_chans, conv.weight.data)
+    except NotImplementedError:
+        new_weight = None
+    if new_weight is None or new_weight.shape[1] != in_chans:
+        # Fallback: average pretrained weight to a single channel then
+        # replicate, scaling by the original-to-target channel ratio so
+        # the post-conv activation magnitude is preserved.
+        avg = conv.weight.data.float().mean(dim=1, keepdim=True)
+        new_weight = avg.expand(-1, in_chans, -1, -1).contiguous()
+        new_weight = new_weight * (conv.in_channels / float(in_chans))
+        new_weight = new_weight.to(conv.weight.dtype)
+
+    new_conv = nn.Conv2d(
+        in_channels=in_chans,
+        out_channels=conv.out_channels,
+        kernel_size=conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        groups=conv.groups,
+        bias=conv.bias is not None,
+    )
+    new_conv.weight.data.copy_(new_weight)
+    if conv.bias is not None:
+        new_conv.bias.data.copy_(conv.bias.data)
+    setattr(parent, parts[-1], new_conv)
+
+
 def _auto_resize(images: torch.Tensor, target_size: int) -> torch.Tensor:
     h, w = images.shape[-2], images.shape[-1]
     if h != target_size or w != target_size:
@@ -75,8 +124,13 @@ def _extract_normalize_transforms(weights) -> nn.Sequential | None:
     transform = weights.transforms
     if callable(transform) and not isinstance(transform, nn.Module):
         transform = transform()
-
-    norms = [t for t in transform if isinstance(t, (NormalizeV1, NormalizeV2))]
+    if isinstance(transform, nn.Identity):
+        return None
+    try:
+        iterator = iter(transform)
+    except TypeError:
+        return None
+    norms = [t for t in iterator if isinstance(t, (NormalizeV1, NormalizeV2))]
     if not norms:
         return None
     return nn.Sequential(*norms)
@@ -148,9 +202,9 @@ class _TorchGeoBackboneBench(BenchModel):
         auto_resize: bool,
         target_size: int | None,
         input_unit_check: str = "warn",
-        **_kwargs: Any,
+        **kwargs: Any,
     ) -> None:
-        super().__init__(bands=bands)
+        super().__init__(bands=bands, **kwargs)
         weights = _resolve_torchgeo_weights(weights_class, weights_member)
         self.weights = weights
         self.backbone = self._load_backbone(weights, factory)
@@ -167,10 +221,10 @@ class _TorchGeoBackboneBench(BenchModel):
         return _resolve_torchgeo_factory(factory)(weights=weights)
 
     def normalize_inputs(self, images: torch.Tensor) -> torch.Tensor:
-        """Apply the pretrained weights' ``Normalize`` layer (no extra z-score)."""
-        if self._weights_normalize is None:
-            return images
-        return self._weights_normalize(images)
+        """Use the weights-bound ``Normalize`` transform if present; else the parent strategy."""
+        if self._weights_normalize is not None:
+            return self._weights_normalize(images)
+        return super().normalize_inputs(images)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +244,7 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
     """
 
     weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.S2_DN
 
     def __init__(
         self,
@@ -211,14 +266,18 @@ class TorchGeoResNetBench(_TorchGeoBackboneBench):
             auto_resize=auto_resize,
             target_size=target_size,
             input_unit_check=input_unit_check,
+            **_kwargs,
         )
         self.backbone.fc = nn.Identity()
+        # Adapt input conv to dataset channel count via timm's averaging /
+        # replication of pretrained weights.  Lets a 13-band MoCo-MSI run
+        # on 3-band RGB or 18-band S1+S2 stacks without crashing.
+        _adapt_first_conv(self.backbone, "conv1", len(bands))
 
     @torch.no_grad()
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return headless ResNet embeddings of shape ``(B, K)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -262,7 +321,6 @@ class TorchGeoSwinBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return headless Swin-V2 embeddings of shape ``(B, K)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -309,7 +367,6 @@ class TorchGeoScaleMAEBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return mean-pooled spatial tokens of shape ``(B, D)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -340,7 +397,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     # torchgeo releases, and dataset units vary widely.
     weights_input_unit = None
 
-    # Approximate centre wavelengths in µm for Sentinel-2 RGB (B4, B3, B2).
     S2_RGB_WAVELENGTHS: list[float] = [0.665, 0.56, 0.49]
 
     def __init__(
@@ -371,7 +427,6 @@ class TorchGeoDOFABench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return DOFA feature embeddings of shape ``(B, D)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
@@ -417,8 +472,110 @@ class TorchGeoEarthLocBench(_TorchGeoBackboneBench):
     def _forward_patch_features(
         self, images: torch.Tensor, bboxes: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """Return EarthLoc global descriptor of shape ``(B, 4096)``."""
         del bboxes
         if self.auto_resize and self.target_size:
             images = _auto_resize(images, self.target_size)
         return self.backbone(images)
+
+
+_CROMA_S2_12 = [
+    "coastal",
+    "blue",
+    "green",
+    "red",
+    "rededge1",
+    "rededge2",
+    "rededge3",
+    "nir",
+    "nir_narrow",
+    "watervapor",
+    "swir1",
+    "swir2",
+]
+
+
+class TorchGeoCromaBench(_TorchGeoBackboneBench):
+    """CROMA optical-only path: feeds ``s2_encoder`` directly and pools via ``s2_GAP_FFN``."""
+
+    weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        *,
+        factory: str = "croma_base",
+        weights_class: str = "CROMABase_Weights",
+        weights_member: str = "CROMA_VIT",
+        auto_resize: bool = True,
+        target_size: int | None = 120,
+        input_unit_check: str = "warn",
+        **_kwargs: Any,
+    ) -> None:
+        super().__init__(
+            bands=bands,
+            factory=factory,
+            weights_class=weights_class,
+            weights_member=weights_member,
+            auto_resize=auto_resize,
+            target_size=target_size,
+            input_unit_check=input_unit_check,
+        )
+
+    @torch.no_grad()
+    def _forward_patch_features(
+        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # Bypass CROMA.forward — its joint branch references `sar_encodings`
+        # even when only the optical modality is provided.
+        from ._band_mapping import map_to_model_bands
+
+        del bboxes
+        if self.auto_resize and self.target_size:
+            images = _auto_resize(images, self.target_size)
+        x_opt, _ = map_to_model_bands(images, self.bands, _CROMA_S2_12)
+        encodings = self.backbone.s2_encoder(imgs=x_opt, attn_bias=self.backbone.attn_bias)
+        return self.backbone.s2_GAP_FFN(encodings.mean(dim=1))
+
+
+class TorchGeoPanopticonBench(_TorchGeoBackboneBench):
+    """Panopticon ViT-B/14 — per-channel wavelength tokens (nm) from BandSpec."""
+
+    weights_input_unit = "s2_dn_div10000"
+    expected_input_unit = InputUnit.REFLECTANCE_0_1
+
+    def __init__(
+        self,
+        bands: list[BandSpec],
+        *,
+        factory: str = "panopticon_vitb14",
+        weights_class: str = "Panopticon_Weights",
+        weights_member: str = "VIT_BASE14",
+        auto_resize: bool = True,
+        target_size: int | None = 224,
+        input_unit_check: str = "warn",
+        **_kwargs: Any,
+    ) -> None:
+        super().__init__(
+            bands=bands,
+            factory=factory,
+            weights_class=weights_class,
+            weights_member=weights_member,
+            auto_resize=auto_resize,
+            target_size=target_size,
+            input_unit_check=input_unit_check,
+        )
+        from ._band_mapping import wavelengths_um
+
+        wls_nm = [w * 1000.0 for w in wavelengths_um(bands, default_um=0.6)]
+        self.register_buffer("_chn_ids", torch.tensor(wls_nm, dtype=torch.float32))
+
+    @torch.no_grad()
+    def _forward_patch_features(
+        self, images: torch.Tensor, bboxes: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        del bboxes
+        if self.auto_resize and self.target_size:
+            images = _auto_resize(images, self.target_size)
+        chn_ids = self._chn_ids.unsqueeze(0).expand(images.shape[0], -1)
+        return self.backbone({"imgs": images, "chn_ids": chn_ids})
