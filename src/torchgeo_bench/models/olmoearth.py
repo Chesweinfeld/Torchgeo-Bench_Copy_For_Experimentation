@@ -5,11 +5,13 @@ BenchModel interface. Supports both RGB (3-channel) and full multispectral
 (12-channel Sentinel-2) input.
 
 When given RGB input, the 3 channels are mapped to B02/B03/B04 in OlmoEarth's
-expected band order, the remaining 9 bands are zero-filled, and the
-corresponding band sets are marked as MISSING in the mask so the model
-treats them as absent data rather than real zero-valued observations.
+expected band order; the remaining 9 bands are zero-filled.  All band sets
+remain marked visible in the mask — the encoder learns to attend through
+zero-valued bands but the docstring's earlier claim of MISSING masking was
+never actually implemented (and breaks ``pool_spatially`` when applied).
 
-Reference implementation:
+Reference implementations (canonical first):
+    https://github.com/allenai/olmoearth_pretrain/blob/main/docs/Inference-Quickstart.md
     https://github.com/isaaccorley/geopool/blob/main/scripts/embed_olmoearth.py
 """
 
@@ -45,9 +47,9 @@ OLMOEARTH_S2_BANDS = (
     "B09",
 )
 
-# Number of channels per band set
+# Number of channels per band set (B02/B03/B04/B08 — B05-B12 — B01/B09).
 _BAND_SET_SIZES = (4, 6, 2)
-_NUM_BAND_SETS = len(_BAND_SET_SIZES)
+_NUM_BAND_SETS = len(_BAND_SET_SIZES)  # 3
 _TOTAL_S2_CHANNELS = sum(_BAND_SET_SIZES)  # 12
 
 
@@ -72,9 +74,14 @@ class OlmoEarthBenchModel(BenchModel):
     Args:
         bands: Either a 3-band RGB list or a 12-band Sentinel-2 list.
         model_size: One of ``"nano"``, ``"tiny"``, ``"base"``, ``"large"``.
-        patch_size: Patch size for the encoder (default 8).
+        patch_size: Patch size for the encoder (default 4 per the AI2 quickstart;
+            smaller patch sizes generally perform better but use more GPU memory).
         input_res: Input resolution in meters (default 10 for Sentinel-2).
-        time_steps: Temporal repeats for single-timestep input (default 3).
+        time_steps: Number of temporal slots in the input.  Default 1, matching the
+            official ``olmoearth_pretrain`` quickstart for single-image inference.
+            Replicating a single image across T>1 timesteps was historically used
+            here to satisfy a buggy 4-D mask shape, but the correct fix is a 5-D
+            mask and T=1 (see ``_build_mask`` below).
         std_multiplier: Standard deviation multiplier for normalization.
         normalize: If True, L2-normalize output embeddings.
     """
@@ -84,9 +91,9 @@ class OlmoEarthBenchModel(BenchModel):
         bands: list[BandSpec],
         *,
         model_size: Literal["nano", "tiny", "base", "large"] = "base",
-        patch_size: int = 8,
+        patch_size: int = 4,
         input_res: int = 10,
-        time_steps: int = 3,
+        time_steps: int = 1,
         std_multiplier: float = 2.0,
         normalize: bool = False,
         **_kwargs,
@@ -102,6 +109,15 @@ class OlmoEarthBenchModel(BenchModel):
         # Lazy imports so the package is only needed when this model is used
         from olmoearth_pretrain_minimal import ModelID, Normalizer, load_model_from_id
         from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import Modality
+
+        # The package logs full ModalitySpec dumps at INFO level on every
+        # encoder construction — useful when developing OlmoEarth itself,
+        # noisy for every torchgeo-bench task.  Demote to WARNING.
+        for logger_name in (
+            "olmoearth_pretrain_minimal",
+            "olmoearth_pretrain_minimal.olmoearth_pretrain_v1",
+        ):
+            logging.getLogger(logger_name).setLevel(logging.WARNING)
 
         self.model_size = model_size
         self.patch_size = patch_size
@@ -130,8 +146,21 @@ class OlmoEarthBenchModel(BenchModel):
         return s2
 
     def _build_mask(self, B: int, H: int, W: int, device: torch.device) -> torch.Tensor:
-        """Build the mask tensor (B, H, W, T) — all visible."""
-        return torch.zeros(B, H, W, self.time_steps, dtype=torch.long, device=device)
+        """Build the per-band-set mask tensor — all visible.
+
+        Shape is ``(B, H, W, T, num_band_sets)`` per AI2's Inference-Quickstart:
+        the encoder's ``apply_embedding_to_modality`` slices ``mask[..., idx]``
+        for each band-set index, so the last dimension MUST be ``num_band_sets``
+        (3 for Sentinel-2: (B02/B03/B04/B08), (B05-B12 minus B10), (B01/B09)).
+
+        The previous 4-D ``(B, H, W, T)`` mask only worked because ``T`` happened
+        to equal ``num_band_sets=3``; with the canonical ``T=1`` it would index
+        out of bounds.  ``ONLINE_ENCODER`` has value 0, so all-zeros == all
+        visible.
+        """
+        return torch.zeros(
+            B, H, W, self.time_steps, _NUM_BAND_SETS, dtype=torch.float32, device=device
+        )
 
     @torch.no_grad()
     def _forward_patch_features(
@@ -153,8 +182,12 @@ class OlmoEarthBenchModel(BenchModel):
 
         B, C, H, W = images.shape
 
+        # Layout: (B, H, W, C) -> (B, H, W, T, C).  np.repeat only when T>1 so
+        # the common T=1 path doesn't allocate a wasted copy.
         images_nhwc = images.permute(0, 2, 3, 1).cpu().numpy()
-        images_nhwtc = np.repeat(images_nhwc[:, :, :, None, :], self.time_steps, axis=3)
+        images_nhwtc = images_nhwc[:, :, :, None, :]
+        if self.time_steps > 1:
+            images_nhwtc = np.repeat(images_nhwtc, self.time_steps, axis=3)
         images_nhwtc = self.normalizer.normalize(self._modality, images_nhwtc)
 
         timestamps = torch.zeros(B, self.time_steps, 3, dtype=torch.long, device=device)
