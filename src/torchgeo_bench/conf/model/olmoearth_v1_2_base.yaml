@@ -1,11 +1,11 @@
-# OlmoEarth-v1.1-Base (AI2 geospatial foundation model)
+# OlmoEarth-v1.2-Base (AI2 geospatial foundation model)
 # Feature dimension: 768
-# v1.1 improves accuracy with ~114M params (up from 89M in v1).
+# v1.2 ships Nano/Tiny/Small/Base with RoPE position encoding (~114M params).
 # Multi-modal: auto-routes S2/SAR/Landsat/NAIP bands to the correct modality.
 
 _target_: torchgeo_bench.models.OlmoEarthBenchModel
 model_size: base
-version: v1_1
+version: v1_2
 patch_size: 8
 input_res: null
 time_steps: 1
@@ -13,4 +13,4 @@ std_multiplier: 2.0
 normalize: false
 image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 min_image_size: 64
-name: olmoearth_v1_1_base
+name: olmoearth_v1_2_base

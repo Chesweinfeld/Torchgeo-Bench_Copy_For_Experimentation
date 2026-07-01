@@ -5,6 +5,5 @@ input_res: null
 time_steps: 6
 std_multiplier: 2.0
 normalize: false
-sensor_remap:
-  landsat: landsat_as_s2
+image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 name: olmoearth_v1_nano_t6

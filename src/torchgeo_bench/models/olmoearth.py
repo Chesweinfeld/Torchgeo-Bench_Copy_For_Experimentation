@@ -94,6 +94,21 @@ _MODALITY_INFO: dict[str, dict] = {
             "swir_cirrus": None,
             "b10": None,
         },
+        # Impute missing channels from the most spectrally-similar present
+        # band (matches helios' per-band imputation; see configs.py imputes).
+        # Each (src, dst) is an OlmoEarth channel index: dst is filled with a
+        # copy of src when dst is absent from the input and src is present.
+        # Wavelengths (um): B01 0.443, B02 0.49, B04 0.665, B05 0.705,
+        # B06 0.74, B07 0.783, B08 0.842, B8A 0.865, B09 0.945.
+        # GeoBench forestnet ships only B02/B03/B04/B8A/B11/B12.
+        "imputes": [
+            (7, 3),  # B08 NIR        <- B8A (0.842 -> 0.865)
+            (2, 4),  # B05 RedEdge1   <- B04 red (0.705 -> 0.665)
+            (2, 5),  # B06 RedEdge2   <- B04 red (0.74 -> 0.665)
+            (7, 6),  # B07 RedEdge3   <- B8A (0.783 -> 0.865)
+            (0, 10),  # B01 Coastal   <- B02 blue (0.443 -> 0.49)
+            (7, 11),  # B09 WaterVap  <- B8A (0.945 -> 0.865)
+        ],
     },
     "landsat": {
         "modality_name": "LANDSAT",
@@ -131,6 +146,18 @@ _MODALITY_INFO: dict[str, dict] = {
             "thermal_2": 10,
             "b11": 10,
         },
+        # Impute missing channels from the most spectrally-similar present
+        # band — mirrors helios m-forestnet exactly (configs.py imputes +
+        # the B8->Green band-name conversion). GeoBench m-forestnet ships
+        # only B2/B3/B4/B5/B6/B7 (blue/green/red/nir/swir1/swir2).
+        # (src, dst) are OlmoEarth LANDSAT channel indices.
+        "imputes": [
+            (3, 0),  # B8  Panchromatic <- B3 green (helios band-name map)
+            (2, 1),  # B1  Coastal      <- B2 blue
+            (7, 8),  # B9  Cirrus       <- B7 swir2
+            (7, 9),  # B10 TIRS-1       <- B7 swir2
+            (7, 10),  # B11 TIRS-2      <- B7 swir2 (helios B11->Tirs1->swir2)
+        ],
     },
     # Sentinel-1 SAR: two channels — vv (0) and vh (1).  OlmoEarth
     # BandSet(["vv", "vh"], 16) with is_multitemporal=True.
@@ -158,29 +185,6 @@ _MODALITY_INFO: dict[str, dict] = {
             "vh_lee": 1,
             "vh_lee_real": 1,
             "vh_lee_imag": 1,
-        },
-    },
-    # Landsat routed through the S2 normalizer.  Wavelengths align well:
-    # B-G-R-NIR-SWIR1-SWIR2 ↔ B02-B03-B04-B08-B11-B12.  Use via
-    # sensor_remap={"landsat": "landsat_as_s2"}.
-    "landsat_as_s2": {
-        "modality_name": "SENTINEL2_L2A",
-        "sample_field": "sentinel2_l2a",
-        "channels": 12,
-        "num_band_sets": 3,
-        "name_to_idx": {
-            "blue": 0,
-            "b2": 0,
-            "green": 1,
-            "b3": 1,
-            "red": 2,
-            "b4": 2,
-            "nir": 3,
-            "b5": 5,
-            "swir_1": 8,
-            "b6": 8,
-            "swir_2": 9,
-            "b7": 9,
         },
     },
     # NAIP / aerial: no dedicated OlmoEarth modality, route RGB through
@@ -222,6 +226,14 @@ _SENSOR_INPUT_RES: dict[str, int] = {
 # detect_input_unit returns S2_DN for them, making to_s2_dn a no-op anyway,
 # but being explicit avoids surprises if the heuristic ever changes.
 _PASSTHROUGH_SENSORS: frozenset[str] = frozenset({"sar"})
+
+# Sensors normalized with dataset (BandSpec) stats rather than OlmoEarth's
+# pretrained normalizer when ``norm_from_pretrained="auto"`` (the default).
+# GeoBench Landsat (m-forestnet) ships as uint8 [0, 255], a scale the
+# pretrained Landsat stats (fit on real DN) can't match — so it needs its own
+# stats.  S2/SAR ship values that rescale cleanly to the pretraining range and
+# keep the pretrained normalizer.
+_DATASET_STATS_SENSORS: frozenset[str] = frozenset({"landsat"})
 
 
 def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
@@ -272,6 +284,25 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
         input_unit: InputUnit | None = (
             None if sensor in _PASSTHROUGH_SENSORS else _detect_band_group_unit(group_bands)
         )
+        # Resolve which imputations actually apply for this input: fill a
+        # missing OlmoEarth channel from the most-similar present band so the
+        # encoder never sees fabricated zeros (matches helios). Only fire when
+        # the target channel is absent and the source channel is present.
+        filled = set(dst_indices)
+        impute_ops: list[tuple[int, int]] = []
+        for src_dst, tgt_dst in info.get("imputes", []):
+            if tgt_dst in filled:
+                continue  # real band present — never overwrite it
+            if src_dst not in filled:
+                logger.warning(
+                    "OlmoEarth %s: cannot impute channel %d (source channel %d "
+                    "is also missing); leaving it zero-filled.",
+                    sensor,
+                    tgt_dst,
+                    src_dst,
+                )
+                continue
+            impute_ops.append((src_dst, tgt_dst))
         result.append(
             {
                 "sensor": sensor,
@@ -282,6 +313,11 @@ def _build_sensor_groups(bands: list[BandSpec]) -> list[dict]:
                 "src_indices": src_indices,
                 "dst_indices": dst_indices,
                 "input_unit": input_unit,
+                "impute_ops": impute_ops,
+                # Per-band dataset stats (src order) for the dataset-stats
+                # normalization path (norm_from_pretrained=False).
+                "src_means": [b.mean for b in group_bands],
+                "src_stds": [b.std for b in group_bands],
             }
         )
     return result
@@ -328,14 +364,23 @@ class OlmoEarthBenchModel(BenchModel):
     building separate tensor branches and populating multiple
     ``MaskedOlmoEarthSample`` fields simultaneously.
 
-    Channels missing from the input are zero-filled at the corresponding
-    OlmoEarth position; the mask stays all-visible so ``pool_spatially``
-    can still produce embeddings.
+    Channels missing from the input are imputed from the most spectrally
+    similar band that *is* present (e.g. Landsat cirrus <- swir2), matching
+    helios' per-dataset imputation.  Imputation is applied after
+    normalization so the imputed channel carries its source band's
+    normalized value rather than a fabricated ``(0 - mean) / std`` constant.
+    A missing channel with no present source band stays zero-filled.  The
+    mask stays all-visible so ``pool_spatially`` can still produce
+    embeddings.
 
-    The wrapper overrides ``normalize_inputs`` to identity — OlmoEarth's
-    internal ``Normalizer`` consumes raw values directly.  Input scale
-    (DN / reflectance / uint8) is auto-detected per sensor group and
-    rescaled to S2 DN before normalisation (SAR values are passed as-is).
+    The wrapper overrides ``normalize_inputs`` to identity and normalizes
+    internally.  Normalization is chosen per sensor group by
+    ``norm_from_pretrained`` (default ``"auto"``): Sentinel-2 / SAR are
+    rescaled to S2 DN and passed to OlmoEarth's pretrained per-modality
+    ``Normalizer`` (SAR as-is), while Landsat — delivered by GeoBench as uint8
+    that can't be matched to the pretrained Landsat range — is normalized with
+    its own ``BandSpec`` stats.  Pass ``True``/``False`` to force one path for
+    all groups.
 
     ``input_res`` is auto-detected from the primary sensor's GSD: 10 m
     for S2/SAR, 30 m for Landsat.  Pass ``input_res`` explicitly to
@@ -343,15 +388,20 @@ class OlmoEarthBenchModel(BenchModel):
 
     Args:
         bands: Ordered ``BandSpec`` list describing the input channels.
-        model_size: One of ``"nano"``, ``"tiny"``, ``"base"``, ``"large"``.
-            ``"large"`` is only available for ``version="v1"``.
-        version: Model version — ``"v1"`` (default) or ``"v1_1"``.  v1.1
-            ships Nano/Tiny/Base with improved accuracy and ~25% more
-            parameters; no Large variant yet.
+        model_size: One of ``"nano"``, ``"tiny"``, ``"small"``, ``"base"``,
+            ``"large"``.  ``"large"`` is only available for ``version="v1"``;
+            ``"small"`` is only available for ``version="v1_2"``.
+        version: Model version — ``"v1"`` (default), ``"v1_1"`` or
+            ``"v1_2"``.  v1.1 ships Nano/Tiny/Base with improved accuracy and
+            ~25% more parameters.  v1.2 ships Nano/Tiny/Small/Base (RoPE
+            position encoding); no Large variant for v1.1/v1.2.
         patch_size: Patch size for the encoder (default 8).
         input_res: Input resolution in meters.  ``None`` (default) lets
             the wrapper auto-detect from the primary sensor GSD.
-        time_steps: Temporal slots in the input.  Default 3.
+        time_steps: Temporal slots in the input.  Default 1 (single
+            timestep — the native shape of these classification datasets).
+            Values > 1 replicate the single input frame into that many
+            identical slots; use only for explicit multi-timestep ablations.
         std_multiplier: Std multiplier passed to ``Normalizer``.
         normalize: If True, L2-normalize output embeddings.
         sar_log_scale: If True, convert SAR values to dB via
@@ -361,9 +411,28 @@ class OlmoEarthBenchModel(BenchModel):
             values *after* the standard uint8→DN conversion.  Use to
             compensate for mis-matched scales between GeoBench's uint8
             composites and OlmoEarth's pretraining DN range (~10 000).
-        sensor_remap: Optional dict mapping sensor names to alternate
-            routing keys, e.g. ``{"landsat": "landsat_as_s2"}`` to route
-            Landsat bands through the S2 normalizer (+6.6 pp on m-forestnet).
+            Only applies on the pretrained-normalizer path
+            (``norm_from_pretrained=True``).
+        norm_from_pretrained: ``"auto"`` (default), ``True`` or ``False``,
+            selecting how each sensor group is normalized:
+
+            * ``True`` — rescale to S2 DN and apply OlmoEarth's pretrained
+              per-modality ``Normalizer`` (correct when the input matches the
+              pretraining scale, e.g. S2/SAR).
+            * ``False`` — normalize each band with its own ``BandSpec``
+              mean/std via the same ``±std_multiplier·σ`` no-clip mapping
+              OlmoEarth saw in pretraining (dataset-specific stats).  Required
+              when the input scale can't match the pretrained normalizer (e.g.
+              GeoBench's uint8 Landsat, whose pretrained stats assume real DN);
+              matches helios' ``norm_stats_from_pretrained=False`` /
+              ``NORM_NO_CLIP_2_STD`` and supersedes ``landsat_scale_factor``
+              (the DN rescale is skipped).
+            * ``"auto"`` — decide per sensor group: dataset stats for sensors
+              in ``_DATASET_STATS_SENSORS`` (Landsat), pretrained for the rest.
+              A single shared config is then correct for both Landsat and S2.
+        sensor_remap: Optional dict mapping sensor names to alternate routing
+            keys before modality resolution, e.g. ``{"landsat": "aerial"}`` to
+            route Landsat RGB+NIR through the aerial/S2 path.
         min_image_size: If set, upsample inputs smaller than this value
             to ``min_image_size × min_image_size`` via bilinear interpolation.
             Useful for datasets with small native images (e.g. m-so2sat at
@@ -374,8 +443,8 @@ class OlmoEarthBenchModel(BenchModel):
         self,
         bands: list[BandSpec],
         *,
-        model_size: Literal["nano", "tiny", "base", "large"] = "base",
-        version: Literal["v1", "v1_1"] = "v1",
+        model_size: Literal["nano", "tiny", "small", "base", "large"] = "base",
+        version: Literal["v1", "v1_1", "v1_2"] = "v1",
         patch_size: int = 4,
         input_res: int | None = None,
         time_steps: int = 1,
@@ -383,6 +452,7 @@ class OlmoEarthBenchModel(BenchModel):
         normalize: bool = False,
         sar_log_scale: bool = False,
         landsat_scale_factor: float | None = None,
+        norm_from_pretrained: bool | Literal["auto"] = "auto",
         sensor_remap: dict[str, str] | None = None,
         min_image_size: int | None = None,
         **_kwargs,
@@ -426,9 +496,11 @@ class OlmoEarthBenchModel(BenchModel):
         self.patch_size = patch_size
         self.input_res = input_res
         self.time_steps = time_steps
+        self.std_multiplier = std_multiplier
         self.do_normalize = normalize
         self.sar_log_scale = sar_log_scale
         self.landsat_scale_factor = landsat_scale_factor
+        self.norm_from_pretrained = norm_from_pretrained
         self.min_image_size = min_image_size
 
         model_id = getattr(ModelID, f"OLMOEARTH_{version.upper()}_{model_size.upper()}")
@@ -454,6 +526,38 @@ class OlmoEarthBenchModel(BenchModel):
         for local_idx, dst_idx in enumerate(dst_indices):
             out[:, dst_idx] = g_images[:, local_idx]
         return out
+
+    def _normalize_with_band_stats(
+        self,
+        g_images: torch.Tensor,
+        means: list[float],
+        stds: list[float],
+    ) -> torch.Tensor:
+        """Per-band ``±std_multiplier·σ`` no-clip normalization from dataset stats.
+
+        Maps each band's ``[mean - m·std, mean + m·std]`` to ``[0, 1]`` (no
+        clipping), matching OlmoEarth's pretraining scheme / helios'
+        ``NORM_NO_CLIP_2_STD`` but using the input's own ``BandSpec`` stats.
+        ``g_images`` is ``(B, Csrc, H, W)`` in source-band order.
+        """
+        m = self.std_multiplier
+        mean_t = torch.tensor(means, dtype=g_images.dtype, device=g_images.device).view(1, -1, 1, 1)
+        std_t = torch.tensor(stds, dtype=g_images.dtype, device=g_images.device).view(1, -1, 1, 1)
+        low = mean_t - m * std_t
+        span = (2.0 * m * std_t).clamp(min=1e-6)
+        return (g_images - low) / span
+
+    def _to_nhwtc(self, g_images: torch.Tensor) -> np.ndarray:
+        """``(B, C, H, W)`` tensor -> ``(B, H, W, T, C)`` numpy, replicating frames.
+
+        ``T`` is ``self.time_steps``; for ``time_steps > 1`` the single input
+        frame is repeated into each temporal slot.
+        """
+        g_nhwc = g_images.permute(0, 2, 3, 1).cpu().numpy()
+        g_nhwtc = g_nhwc[:, :, :, None, :]
+        if self.time_steps > 1:
+            g_nhwtc = np.repeat(g_nhwtc, self.time_steps, axis=3)
+        return g_nhwtc
 
     def _build_mask(
         self,
@@ -513,25 +617,48 @@ class OlmoEarthBenchModel(BenchModel):
             # Extract this sensor's channels from the full input tensor.
             g_images = images[:, group["src_indices"]]  # (B, Csensor, H, W)
 
-            # Rescale to S2 DN unless the sensor is a passthrough type.
-            input_unit = group["input_unit"]
-            if input_unit is not None:
-                g_images = to_s2_dn(g_images, input_unit)
-                if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
-                    g_images = g_images * self.landsat_scale_factor
+            # Pick the normalization path for this sensor group.  "auto" uses
+            # dataset stats for uint8-scale sensors (Landsat) and the pretrained
+            # normalizer for the rest (S2/SAR); True/False force one path.
+            if self.norm_from_pretrained == "auto":
+                use_pretrained = group["sensor"] not in _DATASET_STATS_SENSORS
+            else:
+                use_pretrained = self.norm_from_pretrained
 
-            if group["sensor"] == "sar" and self.sar_log_scale:
-                g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
+            if use_pretrained:
+                # Rescale to S2 DN unless the sensor is a passthrough type, then
+                # apply OlmoEarth's pretrained per-modality Normalizer.
+                input_unit = group["input_unit"]
+                if input_unit is not None:
+                    g_images = to_s2_dn(g_images, input_unit)
+                    if group["sensor"] == "landsat" and self.landsat_scale_factor is not None:
+                        g_images = g_images * self.landsat_scale_factor
+                if group["sensor"] == "sar" and self.sar_log_scale:
+                    g_images = 10.0 * torch.log10(g_images.clamp(min=1e-6))
 
-            # Map input channels -> OlmoEarth modality layout.
-            g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
+                g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
+                g_nhwtc = self._to_nhwtc(g_images)
+                g_nhwtc = self.normalizer.normalize(group["modality"], g_nhwtc)
+            else:
+                # Dataset-specific normalization: map each band's
+                # [mean - m·std, mean + m·std] to [0, 1] (no clip) using its own
+                # BandSpec stats, the same scheme OlmoEarth saw in pretraining.
+                # Required when the input scale doesn't match the pretrained
+                # normalizer (e.g. GeoBench uint8 Landsat).  No DN rescale.
+                g_images = self._normalize_with_band_stats(
+                    g_images, group["src_means"], group["src_stds"]
+                )
+                g_images = self._pad_group(g_images, group["dst_indices"], group["channels"])
+                g_nhwtc = self._to_nhwtc(g_images)
 
-            # Normalize with modality-specific statistics.
-            g_nhwc = g_images.permute(0, 2, 3, 1).cpu().numpy()
-            g_nhwtc = g_nhwc[:, :, :, None, :]
-            if self.time_steps > 1:
-                g_nhwtc = np.repeat(g_nhwtc, self.time_steps, axis=3)
-            g_nhwtc = self.normalizer.normalize(group["modality"], g_nhwtc)
+            # Impute missing channels *after* normalization so each imputed
+            # channel carries the normalized value of its source band. Doing
+            # it post-norm avoids applying the wrong per-band statistics to a
+            # borrowed band (the issue helios works around by re-imputing
+            # after normalization); the result is that the imputed channel is
+            # statistically identical to its source in normalized space.
+            for src_dst, tgt_dst in group["impute_ops"]:
+                g_nhwtc[..., tgt_dst] = g_nhwtc[..., src_dst]
 
             field = group["sample_field"]
             mask = self._build_mask(B, H, W, group["num_band_sets"], device)

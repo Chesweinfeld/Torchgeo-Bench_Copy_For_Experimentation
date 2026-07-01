@@ -7,10 +7,9 @@ model_size: nano
 version: v1_1
 patch_size: 8
 input_res: null
-time_steps: 3
+time_steps: 1
 std_multiplier: 2.0
 normalize: false
-sensor_remap:
-  landsat: landsat_as_s2
+image_size: null  # OlmoEarth is resolution-flexible; evaluate at native size
 min_image_size: 64
 name: olmoearth_v1_1_nano

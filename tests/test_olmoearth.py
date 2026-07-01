@@ -53,8 +53,8 @@ def _s2_bands() -> list[BandSpec]:
     ]
 
 
-# Map variant -> expected embedding dim (from the four HF weights configs).
-EXPECTED_DIM = {"nano": 128, "tiny": 192, "base": 768, "large": 1024}
+# Map variant -> expected embedding dim (from the HF weights configs).
+EXPECTED_DIM = {"nano": 128, "tiny": 192, "small": 384, "base": 768, "large": 1024}
 
 
 @requires_olmoearth
@@ -102,6 +102,10 @@ def test_all_variants_are_loadable() -> None:
         "OLMOEARTH_V1_1_NANO",
         "OLMOEARTH_V1_1_TINY",
         "OLMOEARTH_V1_1_BASE",
+        "OLMOEARTH_V1_2_NANO",
+        "OLMOEARTH_V1_2_TINY",
+        "OLMOEARTH_V1_2_SMALL",
+        "OLMOEARTH_V1_2_BASE",
     }
 
 
@@ -264,7 +268,8 @@ def test_aerial_falls_back_to_s2() -> None:
 @requires_olmoearth
 def test_partial_s2_10band_forward_pass() -> None:
     """10-band S2 input (m-so2sat-style, no B01/B09) routes through the
-    S2 modality with B01/B09 positions zero-filled by name-based mapping."""
+    S2 modality; B01/B09 are imputed from the nearest present band
+    (blue / B8A) — matching helios' m-so2sat imputes — not zero-filled."""
     from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
 
     names = ["b02", "b03", "b04", "b08", "b05", "b06", "b07", "b8a", "b11", "b12"]
@@ -285,11 +290,134 @@ def test_partial_s2_10band_forward_pass() -> None:
     model.eval()
     assert g["channels"] == 12
     assert g["num_band_sets"] == 3
-    # B02..B12 map to positions 0..9; B01/B09 (positions 10/11) get zero-filled.
+    # B02..B12 map to positions 0..9; B01/B09 (positions 10/11) are absent.
     assert set(g["dst_indices"]) == set(range(10))
+    # B01 coastal (10) <- B02 blue (0); B09 water vapour (11) <- B8A (7).
+    assert g["impute_ops"] == [(0, 10), (7, 11)]
     x = torch.rand(2, 10, 64, 64) * 3000.0
     out = model.forward_patch_features(x)
     assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_forestnet_landsat_imputes_missing_bands() -> None:
+    """m-forestnet ships only 6 of 11 Landsat channels.  The 5 missing
+    OlmoEarth positions must be imputed from the most spectrally similar
+    present band (matching helios) rather than left zero-filled."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    landsat_bands = [
+        BandSpec(
+            sensor="landsat",
+            name=n,
+            source_name=n.upper(),
+            mean=80.0,
+            std=20.0,
+            min=0.0,
+            max=255.0,
+        )
+        for n in names
+    ]
+    model = OlmoEarthBenchModel(bands=landsat_bands, model_size="nano", normalization="identity")
+    g = model._sensor_groups[0]
+    # pan<-green(3), coastal<-blue(2), cirrus/tirs1/tirs2<-swir2(7); each
+    # source channel (3, 2, 7) is one of the present bands.
+    assert g["impute_ops"] == [(3, 0), (2, 1), (7, 8), (7, 9), (7, 10)]
+    assert all(src in set(g["dst_indices"]) for src, _ in g["impute_ops"])
+    model.eval()
+    x = torch.rand(2, 6, 64, 64) * 200.0
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_landsat_dataset_stats_normalization() -> None:
+    """norm_from_pretrained=False normalizes each band with its BandSpec stats
+    (helios-style ±2σ no-clip), bypassing the DN rescale + pretrained
+    Normalizer — required for GeoBench's uint8 Landsat scale."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    names = ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    bands = [
+        BandSpec(
+            sensor="landsat",
+            name=n,
+            source_name=n.upper(),
+            mean=80.0,
+            std=20.0,
+            min=0.0,
+            max=255.0,
+        )
+        for n in names
+    ]
+    model = OlmoEarthBenchModel(
+        bands=bands, model_size="nano", normalization="identity", norm_from_pretrained=False
+    )
+    assert model.norm_from_pretrained is False
+    g = model._sensor_groups[0]
+    assert len(g["src_means"]) == 6 and len(g["src_stds"]) == 6
+    model.eval()
+    x = torch.rand(2, 6, 64, 64) * 200.0  # uint8-scale Landsat
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM["nano"])
+    assert torch.isfinite(out).all()
+
+
+@requires_olmoearth
+def test_auto_normalization_default_per_sensor() -> None:
+    """Default norm_from_pretrained='auto' routes Landsat to dataset stats and
+    S2 to the pretrained normalizer, so one shared config is correct for both.
+    Both must produce finite embeddings without an explicit override."""
+    from torchgeo_bench.models._input_units import InputUnit
+    from torchgeo_bench.models.olmoearth import _DATASET_STATS_SENSORS, OlmoEarthBenchModel
+
+    # Landsat (uint8) — 'auto' should pick dataset stats.
+    ls = [
+        BandSpec(
+            sensor="landsat", name=n, source_name=n.upper(), mean=80.0, std=20.0, min=0.0, max=255.0
+        )
+        for n in ("blue", "green", "red", "nir", "swir_1", "swir_2")
+    ]
+    ls_model = OlmoEarthBenchModel(bands=ls, model_size="nano", normalization="identity")
+    assert ls_model.norm_from_pretrained == "auto"  # default
+    assert ls_model._sensor_groups[0]["sensor"] in _DATASET_STATS_SENSORS
+    ls_model.eval()
+    ls_out = ls_model.forward_patch_features(torch.rand(2, 6, 64, 64) * 200.0)
+    assert ls_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(ls_out).all()
+
+    # S2 (DN) — 'auto' should keep the pretrained normalizer (rescale to DN).
+    s2 = [
+        BandSpec(
+            sensor="s2", name=n, source_name=n.upper(), mean=1500.0, std=600.0, min=0.0, max=10000.0
+        )
+        for n in ("red", "green", "blue")
+    ]
+    s2_model = OlmoEarthBenchModel(bands=s2, model_size="nano", normalization="identity")
+    assert s2_model._sensor_groups[0]["sensor"] not in _DATASET_STATS_SENSORS
+    s2_model.eval()
+    s2_out = s2_model.forward_patch_features(torch.rand(2, 3, 64, 64) * 3000.0)
+    assert s2_out.shape == (2, EXPECTED_DIM["nano"]) and torch.isfinite(s2_out).all()
+    # sanity: input-unit detection still runs on the S2 (pretrained) path
+    assert s2_model._sensor_groups[0]["input_unit"] == InputUnit.S2_DN
+
+
+@requires_olmoearth
+@pytest.mark.parametrize("size", ["nano", "small"])
+def test_v1_2_variants_forward_pass(size: str) -> None:
+    """OlmoEarth v1.2 (Nano/Tiny/Small/Base) must load and run; Small is the
+    new 384-d size introduced in v1.2."""
+    from torchgeo_bench.models.olmoearth import OlmoEarthBenchModel
+
+    model = OlmoEarthBenchModel(
+        bands=_rgb_bands(), model_size=size, version="v1_2", normalization="identity"
+    )
+    model.eval()
+    x = torch.rand(2, 3, 64, 64) * 3000.0
+    out = model.forward_patch_features(x)
+    assert out.shape == (2, EXPECTED_DIM[size])
     assert torch.isfinite(out).all()
 
 

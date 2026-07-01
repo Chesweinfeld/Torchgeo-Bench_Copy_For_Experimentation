@@ -106,10 +106,16 @@ optional ``olmoearth`` extra:
    $ torchgeo-bench run model=olmoearth_v1_1_tiny
    $ torchgeo-bench run model=olmoearth_v1_1_base
 
+   $ # OlmoEarth v1.2 (Nano / Tiny / Small / Base)
+   $ torchgeo-bench run model=olmoearth_v1_2_nano
+   $ torchgeo-bench run model=olmoearth_v1_2_small
+   $ torchgeo-bench run model=olmoearth_v1_2_base
+
 OlmoEarth v1.1 uses a **linear patch embedding** (vs. convolutional in v1),
 a single bandset per modality, and updated masking/loss functions, yielding a
-≈ 3× reduction in MACs with comparable accuracy.  The ``version`` parameter
-selects the weight family:
+≈ 3× reduction in MACs with comparable accuracy.  OlmoEarth v1.2 adds **RoPE
+3D position encoding** and a new **Small** size (384-d) between Tiny and Base.
+The ``version`` parameter selects the weight family:
 
 .. list-table::
    :header-rows: 1
@@ -147,6 +153,22 @@ selects the weight family:
      - v1.1
      - Base
      -
+   * - ``olmoearth_v1_2_nano``
+     - v1.2
+     - Nano
+     - RoPE position encoding
+   * - ``olmoearth_v1_2_tiny``
+     - v1.2
+     - Tiny
+     -
+   * - ``olmoearth_v1_2_small``
+     - v1.2
+     - Small
+     - new size (384-d, ≈ 35.6M params)
+   * - ``olmoearth_v1_2_base``
+     - v1.2
+     - Base
+     -
 
 .. note::
 
@@ -156,11 +178,25 @@ selects the weight family:
    wrappers that declare pretrained input units / statistics, or ``identity``
    when a backbone owns all normalization internally.
 
-   For datasets using Landsat imagery (e.g. ``m-forestnet``), all OlmoEarth
-   configs route Landsat through the Sentinel-2 normalizer via
-   ``sensor_remap: {landsat: landsat_as_s2}``; this is required because
-   GeoBench delivers Landsat as uint8 [0, 255] and the Landsat normalizer
-   expects a different dynamic range.
+   GeoBench delivers Landsat imagery (e.g. ``m-forestnet``) as uint8
+   [0, 255], a scale OlmoEarth's pretrained Landsat statistics (fit on real
+   DN) can't match.  OlmoEarth therefore selects normalization per sensor
+   (``norm_from_pretrained="auto"``, the default): Landsat is normalized with
+   dataset-specific ``BandSpec`` stats while Sentinel-2 / SAR use the
+   pretrained normalizer.  Pass ``model.norm_from_pretrained=true`` (or
+   ``false``) to force one path for all sensors.
+
+.. note::
+
+   **Per-model input resolution.**  A model config may set ``image_size`` to
+   override the global ``dataset.image_size`` (default ``224``).  OlmoEarth is
+   resolution-flexible, so its configs set ``image_size: null`` to evaluate at
+   each dataset's **native** resolution rather than upsampling to 224×224
+   (matching the reference OlmoEarth evals).  Models that omit the field
+   inherit ``dataset.image_size``.  To force a specific size for a run, pass
+   ``model.image_size=<int>`` (or ``~model.image_size`` to fall back to the
+   dataset default).  The effective size is recorded in the results CSV and
+   in the resume cache key.
 
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
