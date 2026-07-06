@@ -33,6 +33,7 @@ from .m_forestnet import MForestnet
 from .m_pv4ger import MPv4ger
 from .m_so2sat import MSo2Sat
 from .pastis import PASTIS
+from .rio_favela import RioFavela
 from .so2sat import So2Sat
 from .spacenet2 import SpaceNet2
 from .spacenet7 import SpaceNet7
@@ -70,6 +71,8 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         # torchgeo template
         EuroSAT,
         EuroSATSpatial,
+        # Custom (non-GeoBench) contributed classification dataset
+        RioFavela,
     ]
 }
 
