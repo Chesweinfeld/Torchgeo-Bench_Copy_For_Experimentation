@@ -69,6 +69,11 @@ class BenchDataset(ABC):
         multilabel: Whether labels are multi-hot (e.g. BigEarthNet).
         supports_partitions: Whether the dataset honours a non-default
             ``partition`` argument (V1 GeoBench datasets do; V2 does not).
+        geo_fields: Per-sample geolocation/time fields this dataset can
+            attach to each sample dict (e.g. ``("lat", "lon", "year")``).
+            Empty by default — no geolocation is surfaced. Only meaningful
+            to models with :attr:`~torchgeo_bench.models.interface.BenchModel.requires_geolocation`
+            set, e.g. models that look up precomputed embeddings by location.
     """
 
     name: str
@@ -79,6 +84,7 @@ class BenchDataset(ABC):
     split_sizes: dict[str, int]
     multilabel: bool = False
     supports_partitions: bool = False
+    geo_fields: tuple[str, ...] = ()
 
     @property
     def num_channels(self) -> int:

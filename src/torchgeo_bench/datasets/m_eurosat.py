@@ -16,6 +16,7 @@ class MEurosat(_V1Dataset):
     multilabel = False
     rgb_bands = ["red", "green", "blue"]
     split_sizes = {"train": 2000, "val": 1000, "test": 1000}
+    geo_fields = ("lat", "lon", "year")
 
     # fmt: off
     bands = [

@@ -181,6 +181,13 @@ class _V2Dataset(BenchDataset):
                     for key in [k for k in sample if k.startswith("image_")]:
                         wrapped = transform({"image": sample[key]})
                         sample[key] = wrapped["image"]
+                    # The loop above only ever sees "image_*" keys, so mask
+                    # was previously left at its native resolution here --
+                    # silently mismatched against the just-resized image(s)
+                    # for every by_sensor + segmentation dataset (found via
+                    # dynamic_earthnet). Resize it explicitly too.
+                    if "mask" in sample:
+                        sample["mask"] = transform({"mask": sample["mask"]})["mask"]
             return sample
 
         kwargs: dict[str, object] = {
@@ -192,6 +199,8 @@ class _V2Dataset(BenchDataset):
         }
         if self.band_order_strategy == "by_sensor":
             kwargs["return_stacked_image"] = True
+        if self.geo_fields:
+            kwargs["metadata"] = list(self.geo_fields)
 
         return GeoBenchv2(
             root=self.data_root(),

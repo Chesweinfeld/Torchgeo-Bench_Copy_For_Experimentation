@@ -24,9 +24,14 @@ Models whose backbones do their own normalization (e.g. OlmoEarth) override
 normalization strategy (ImageNet-style for pretrained RGB CNNs, weights-bound
 ``Normalize`` transforms for torchgeo wrappers, etc.) override
 :meth:`normalize_inputs` with their own policy.
+
+A small number of models don't run a pixel forward pass at all — they look
+up a precomputed embedding by location/time (e.g. GeoTessera). These set
+``requires_geolocation = True`` and implement :meth:`_forward_patch_features_geo`
+instead of :meth:`_forward_patch_features`; see that method's docstring.
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import torch
 import torch.nn as nn
@@ -55,11 +60,16 @@ class BenchModel(nn.Module, ABC):
       Used by the ``model_native`` strategy.
     * ``pretrain_mean`` / ``pretrain_std`` — per-channel normalisation
       applied *after* unit conversion under ``model_native``.
+    * ``requires_geolocation`` — set ``True`` to receive a ``geo`` dict
+      (``lat``/``lon``/``year`` tensors, when the dataset supplies them)
+      and dispatch to :meth:`_forward_patch_features_geo` instead of
+      :meth:`_forward_patch_features`.
     """
 
     expected_input_unit: InputUnit | None = None
     pretrain_mean: list[float] | None = None
     pretrain_std: list[float] | None = None
+    requires_geolocation: bool = False
 
     def __init__(
         self,
@@ -85,13 +95,14 @@ class BenchModel(nn.Module, ABC):
         """Apply the configured normalisation strategy."""
         return self._normalizer(images)
 
-    @abstractmethod
     def _forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
         """Subclass hook — receives normalized ``(B, C, H, W)``, returns ``(B, K)``.
 
         Implementations should call only the backbone; the public
         :meth:`forward_patch_features` has already applied
-        :meth:`normalize_inputs`.
+        :meth:`normalize_inputs`. Required for every model except those with
+        :attr:`requires_geolocation` set, which implement
+        :meth:`_forward_patch_features_geo` instead.
 
         Args:
             images: Normalized input tensor of shape ``(B, C, H, W)``.
@@ -99,18 +110,61 @@ class BenchModel(nn.Module, ABC):
         Returns:
             Embeddings tensor of shape ``(B, K)``.
         """
-        raise NotImplementedError
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _forward_patch_features "
+            "(or set requires_geolocation=True and implement "
+            "_forward_patch_features_geo)."
+        )
 
-    def forward_patch_features(self, images: torch.Tensor) -> torch.Tensor:
+    def _forward_patch_features_geo(
+        self, images: torch.Tensor, geo: dict[str, torch.Tensor] | None
+    ) -> torch.Tensor:
+        """Subclass hook for :attr:`requires_geolocation` models.
+
+        Receives the same normalized ``(B, C, H, W)`` tensor as
+        :meth:`_forward_patch_features` (pixel content may be ignored
+        entirely) plus ``geo``: a dict of per-sample tensors drawn from
+        whatever the dataset's :attr:`~torchgeo_bench.datasets.base.BenchDataset.geo_fields`
+        supplies (a subset of ``lat``/``lon``/``year``), or ``None`` if the
+        dataset supplies none. Must return ``(B, K)`` embeddings.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} sets requires_geolocation=True but does not "
+            "implement _forward_patch_features_geo."
+        )
+
+    def forward_patch_features(
+        self, images: torch.Tensor, geo: dict[str, torch.Tensor] | None = None
+    ) -> torch.Tensor:
         """Return a batch of vector embeddings ``(B, K)`` from raw inputs.
 
         Sealed: applies :meth:`normalize_inputs` then dispatches to
-        :meth:`_forward_patch_features`.  Override
-        :meth:`normalize_inputs` to change the normalization policy and
-        :meth:`_forward_patch_features` to change the backbone forward.
+        :meth:`_forward_patch_features`, or to
+        :meth:`_forward_patch_features_geo` (passing ``geo`` through) when
+        :attr:`requires_geolocation` is set.  Override
+        :meth:`normalize_inputs` to change the normalization policy.
         """
-        return self._forward_patch_features(self.normalize_inputs(images))
+        normalized = self.normalize_inputs(images)
+        if self.requires_geolocation:
+            return self._forward_patch_features_geo(normalized, geo)
+        return self._forward_patch_features(normalized)
 
-    def forward(self, images: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, images: torch.Tensor, geo: dict[str, torch.Tensor] | None = None
+    ) -> torch.Tensor:
         """Alias for :meth:`forward_patch_features`."""
-        return self.forward_patch_features(images)
+        return self.forward_patch_features(images, geo=geo)
+
+
+_GEO_KEYS = ("lat", "lon", "year")
+
+
+def extract_geo_from_batch(batch: dict) -> dict[str, torch.Tensor] | None:
+    """Pull ``lat``/``lon``/``year`` tensors out of a dataloader batch dict.
+
+    Returns ``None`` when the dataset didn't supply any of them (the common
+    case), so callers can pass the result straight through as ``geo=``
+    without an extra branch.
+    """
+    geo = {k: batch[k].float() for k in _GEO_KEYS if k in batch}
+    return geo or None

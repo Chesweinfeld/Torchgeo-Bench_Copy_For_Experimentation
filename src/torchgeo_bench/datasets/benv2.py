@@ -18,6 +18,7 @@ class BENV2(_V2Dataset):
     multilabel = True
     rgb_bands = ["b04", "b03", "b02"]
     split_sizes = {"train": 20000, "val": 4000, "test": 4000}
+    geo_fields = ("lat", "lon")
 
     # fmt: off
     bands = [

@@ -2,6 +2,7 @@
 
 from ._input_units import InputUnit
 from ._normalization import NormalizationStrategy
+from .geotessera_embedding import GeoTesseraEmbeddingBenchModel
 from .image_stats import ImageStatsBench
 from .interface import BenchModel
 from .olmoearth import OlmoEarthBenchModel
@@ -13,6 +14,7 @@ from .terratorch_models import (
     TerraTorchPrithviBench,
     TerraTorchTerraMindBench,
 )
+from .tessera_v1_1 import TesseraV1_1BenchModel
 from .timm import TimmPatchBenchModel
 from .torchgeo_models import (
     TorchGeoCromaBench,
@@ -30,6 +32,7 @@ __all__: list[str] = [
     "NormalizationStrategy",
     "RCFBench",
     "ImageStatsBench",
+    "GeoTesseraEmbeddingBenchModel",
     "TimmPatchBenchModel",
     "OlmoEarthBenchModel",
     "SAM3Encoder",
@@ -43,6 +46,7 @@ __all__: list[str] = [
     "TerraTorchPrithviBench",
     "TerraTorchClayBench",
     "TerraTorchTerraMindBench",
+    "TesseraV1_1BenchModel",
     "LinearHead",
     "PatchLinearHead",
     "ConvBlockHead",

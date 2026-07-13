@@ -32,6 +32,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .geobench_v1 import sample_geolocation
+
 logger = logging.getLogger(__name__)
 
 V1_HF_REPO_ID = "isaaccorley/geobenchv1-webdataset"
@@ -106,8 +108,10 @@ class GeoBenchv1Sharded(Dataset):
         partition: str = "default",
         bands: tuple[str, ...] | None = None,
         transform: Callable[[dict], dict] | None = None,
+        geo_fields: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
+        self.geo_fields = geo_fields
         self.dataset_dir = Path(root) / dataset_name
         if not self.dataset_dir.exists():
             raise FileNotFoundError(f"Sharded dataset dir not found: {self.dataset_dir}")
@@ -193,6 +197,9 @@ class GeoBenchv1Sharded(Dataset):
             label_t = torch.tensor(label_arr.item(), dtype=torch.long)
 
         sample: dict = {"image": image_t, "label": label_t, "sample_id": sid}
+        if self.geo_fields:
+            band_meta = meta[self.band_names[0]]
+            sample.update(sample_geolocation(band_meta, self.geo_fields, *image.shape[-2:]))
         if self.transform is not None:
             sample = self.transform(sample)
         return sample

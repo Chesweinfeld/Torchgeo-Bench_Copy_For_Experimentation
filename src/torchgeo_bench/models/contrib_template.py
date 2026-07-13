@@ -91,9 +91,14 @@ class NewModel(BenchModel):
     def _forward_patch_features(
         self,
         images: torch.Tensor,
-        _bboxes: torch.Tensor | None = None,  # required by interface; ignore
     ) -> torch.Tensor:
         """Return embeddings ``(B, K)`` from already-normalized inputs.
+
+        (If your model looks up a precomputed embedding by location/time
+        instead of running a real forward pass — e.g. GeoTessera — set
+        ``requires_geolocation = True`` and implement
+        ``_forward_patch_features_geo(self, images, geo)`` instead; see
+        ``BenchModel`` in ``interface.py``.)
 
         ``images`` has shape ``(B, C, H, W)`` and has already been passed
         through ``normalize_inputs`` by the sealed ``forward_patch_features``.

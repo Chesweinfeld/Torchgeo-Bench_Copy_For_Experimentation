@@ -179,6 +179,60 @@ class TestV2Loading:
                 assert bo == ["B04", "B03", "B02"], bo
 
 
+class MockPerModalityNoCanonicalize:
+    """Stand-in for an upstream by_sensor dataset with NO canonicalize_sample
+    override on the torchgeo-bench wrapper side (e.g. dynamic_earthnet) --
+    exercises the ``chained`` wrapper's per-modality "else" branch directly,
+    since no top-level "image" key is ever produced.
+    """
+
+    def __init__(self, root, split, transforms=None, band_order=None, **kwargs):
+        del root, split, kwargs
+        self.transforms = transforms
+        self.band_order = band_order or {}
+        self.h, self.w = 32, 32
+
+    def __len__(self):
+        return 4
+
+    def __getitem__(self, idx):
+        del idx
+        sample = {
+            f"image_{modality}": torch.randn(len(bands), self.h, self.w)
+            for modality, bands in self.band_order.items()
+        }
+        sample["mask"] = torch.randint(0, 5, (self.h, self.w))
+        if self.transforms is not None:
+            sample = self.transforms(sample)
+        return sample
+
+
+class TestPerModalityMaskResize:
+    """dynamic_earthnet's real crash + mask-resolution-mismatch bug, isolated
+    from real data: a by_sensor dataset whose wrapper has no
+    canonicalize_sample override never gets a top-level "image" key, so the
+    per-modality resize loop must also resize "mask" explicitly.
+    """
+
+    def test_mask_is_resized_alongside_per_modality_images(self):
+        with patch(
+            "geobench_v2.datasets.GeoBenchDynamicEarthNet",
+            MagicMock(side_effect=MockPerModalityNoCanonicalize),
+        ):
+            _, train_dl, _ = get_datasets(
+                dataset_name="dynamic_earthnet",
+                bands="all",
+                image_size=16,
+                batch_size=2,
+                num_workers=0,
+            )
+            batch = next(iter(train_dl))
+            assert batch["mask"].shape[-2:] == (16, 16)
+            for key in batch:
+                if key.startswith("image_"):
+                    assert batch[key].shape[-2:] == (16, 16)
+
+
 class MockKuroSiwo:
     """Stand-in for ``geobench_v2.datasets.GeoBenchKuroSiwo``.
 

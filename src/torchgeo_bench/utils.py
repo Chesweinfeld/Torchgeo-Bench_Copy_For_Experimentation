@@ -5,6 +5,8 @@ import torch
 from rich.progress import track
 from torch.utils.data import DataLoader
 
+from torchgeo_bench.models.interface import extract_geo_from_batch
+
 
 def extract_features(
     model: torch.nn.Module,
@@ -43,12 +45,14 @@ def extract_features(
                 "SegmentationProbe.extract_segmentation_features() instead."
             )
         labels = batch["label"].numpy()
+        geo = extract_geo_from_batch(batch)
+        model_kwargs = {"geo": geo} if geo is not None else {}
 
         if transforms is not None:
             images = transforms(images)
 
         with torch.no_grad(), torch.inference_mode():
-            features = model(images)
+            features = model(images, **model_kwargs)
             if isinstance(features, torch.Tensor):
                 features = features.cpu().numpy()
             else:

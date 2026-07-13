@@ -1,0 +1,11 @@
+# GeoTessera precomputed-embedding lookup (ucam-eo/tessera embeddings)
+# Feature dimension: 128
+# Does NOT run a forward pass on pixels — looks up the precomputed Tessera
+# embedding at each sample's location/year via the public geotessera S3
+# store. Requires the dataset to declare geo_fields (at least lat/lon),
+# e.g. m-eurosat, benv2. Install with: pip install torchgeo-bench[geotessera]
+
+_target_: torchgeo_bench.models.GeoTesseraEmbeddingBenchModel
+default_year: 2024
+store_url: null
+name: geotessera_v1

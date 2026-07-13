@@ -162,6 +162,42 @@ selects the weight family:
    GeoBench delivers Landsat as uint8 [0, 255] and the Landsat normalizer
    expects a different dynamic range.
 
+Tessera (ucam-eo)
+^^^^^^^^^^^^^^^^^
+
+:class:`~torchgeo_bench.models.TesseraV1_1BenchModel`.  Tessera's own
+checkpoints are hosted on Google Drive, not HuggingFace Hub, so the
+``mpc`` variant auto-downloads from an unofficial HF mirror
+(``Chesapeakeiw/tessera-v1.1-mpc-encoder``, re-uploaded from the original
+CC0-licensed Drive link):
+
+.. code-block:: console
+
+   $ torchgeo-bench run model=tessera_v1_1_mpc dataset.names=[m-eurosat]
+
+The ``aws``-preprocessing variant has no HF mirror yet, so it still requires
+a manually-downloaded local checkpoint (different normalization stats — must
+match the downloaded ``.pt`` file):
+
+.. code-block:: console
+
+   $ # download tessera_v1_1_aws_encoder.pt from the table at
+   $ # https://github.com/ucam-eo/tessera/tree/v1.1#v11-qat-model-weight-latest-recommended
+   $ torchgeo-bench run model=tessera_v1_1_aws \
+       model.checkpoint_path=/path/to/tessera_v1_1_aws_encoder.pt
+
+Either variant accepts ``checkpoint_path`` to override with a local file
+instead of the default source.
+
+Tessera is a genuinely per-pixel model with no spatial mixing; this wrapper
+runs every pixel of a chip through the encoder independently and mean-pools
+the resulting embeddings.  GeoBench chips are single-timestamp, so the
+day-of-year the encoder expects is approximated via ``default_doy`` (default
+182, mid-year).  SAR/S1 is disabled by default (``enable_sar: false``) —
+GeoBench's dB-scaled S1 bands don't match Tessera's linear-scale S1
+normalization and no verified conversion exists yet; passing
+``enable_sar=true`` opts into this experimental, unverified path anyway.
+
 SAM 3 vision encoder
 ^^^^^^^^^^^^^^^^^^^^
 

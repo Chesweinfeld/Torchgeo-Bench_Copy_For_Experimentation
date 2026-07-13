@@ -1,0 +1,17 @@
+# Tessera v1.1 encoder (Microsoft Planetary Computer preprocessing)
+# Feature dimension: 128
+# Real S2 (+optional S1) transformer encoder from ucam-eo/tessera (v1.1 branch).
+# Auto-downloaded from an unofficial HF Hub mirror of the original CC0-licensed
+# Google Drive checkpoint (Chesapeakeiw/tessera-v1.1-mpc-encoder). Set
+# checkpoint_path to override with a local file instead.
+# SAR/S1 is disabled by default (enable_sar) -- GeoBench's dB-scaled S1 bands
+# don't match Tessera's linear-scale S1 normalization; no verified conversion
+# exists yet. See torchgeo_bench.models.tessera_v1_1 module docstring.
+
+_target_: torchgeo_bench.models.TesseraV1_1BenchModel
+checkpoint_path: null
+data_source: mpc
+default_doy: 182
+enable_sar: false
+pixel_chunk_size: 8192
+name: tessera_v1_1_mpc

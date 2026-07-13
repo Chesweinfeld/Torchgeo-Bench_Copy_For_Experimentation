@@ -33,6 +33,7 @@ from .m_forestnet import MForestnet
 from .m_pv4ger import MPv4ger
 from .m_so2sat import MSo2Sat
 from .pastis import PASTIS
+from .rio_favela import RioFavela
 from .so2sat import So2Sat
 from .spacenet2 import SpaceNet2
 from .spacenet7 import SpaceNet7
@@ -70,6 +71,8 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         # torchgeo template
         EuroSAT,
         EuroSATSpatial,
+        # Custom (non-GeoBench) contributed classification dataset
+        RioFavela,
     ]
 }
 
@@ -97,6 +100,57 @@ def list_datasets() -> list[str]:
     return sorted(_REGISTRY)
 
 
+class _ResizeTransform:
+    """Sample-level transform that resizes ``image`` (and ``mask``).
+
+    A plain class (rather than a closure) so instances are picklable and can
+    be sent to DataLoader worker processes under the ``spawn`` start method
+    (the macOS/Windows default).
+    """
+
+    def __init__(self, image_size: int, interp_mode: str, align_corners: bool | None) -> None:
+        self.image_size = image_size
+        self.interp_mode = interp_mode
+        self.align_corners = align_corners
+
+    def __call__(self, sample: dict) -> dict:
+        image_size = self.image_size
+        if "image" in sample:
+            img: torch.Tensor = sample["image"]
+            h, w = img.shape[-2], img.shape[-1]
+            if h != image_size or w != image_size:
+                # Flatten every leading dim (channels, and any extra axis some
+                # datasets carry -- e.g. dynamic_earthnet's (T, C, H, W) Planet
+                # stack) into one batch dim for F.interpolate, then restore the
+                # original leading shape. A no-op reshape for the common (C,H,W)
+                # case, so behavior is unchanged there.
+                leading_shape = img.shape[:-2]
+                img = F.interpolate(
+                    img.reshape(-1, h, w).unsqueeze(0),
+                    size=(image_size, image_size),
+                    mode=self.interp_mode,
+                    align_corners=self.align_corners,
+                ).squeeze(0)
+                img = img.reshape(*leading_shape, image_size, image_size)
+                sample["image"] = img
+        if "mask" in sample:
+            mask: torch.Tensor = sample["mask"].float()
+            h_m, w_m = mask.shape[-2], mask.shape[-1]
+            if h_m != image_size or w_m != image_size:
+                # Same leading-dim generalization as "image" above -- e.g.
+                # dynamic_earthnet's mask still carries rasterio's leading
+                # band dim (1, H, W) at this point, not yet squeezed to 2D.
+                leading_shape = mask.shape[:-2]
+                mask = F.interpolate(
+                    mask.reshape(-1, h_m, w_m).unsqueeze(0),
+                    size=(image_size, image_size),
+                    mode="nearest",
+                ).squeeze(0)
+                mask = mask.reshape(*leading_shape, image_size, image_size).long()
+                sample["mask"] = mask
+        return sample
+
+
 def _make_resize_transform(
     image_size: int | None,
     interpolation: str,
@@ -108,38 +162,9 @@ def _make_resize_transform(
     valid_modes = ("bicubic", "bilinear", "nearest")
     if interpolation not in valid_modes:
         raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
-    interp_mode = interpolation
-    align_corners = False if interp_mode in ("bicubic", "bilinear") else None
+    align_corners = False if interpolation in ("bicubic", "bilinear") else None
 
-    def _resize(sample: dict) -> dict:
-        img: torch.Tensor = sample["image"]
-        h, w = img.shape[-2], img.shape[-1]
-        if h != image_size or w != image_size:
-            img = F.interpolate(
-                img.unsqueeze(0),
-                size=(image_size, image_size),
-                mode=interp_mode,
-                align_corners=align_corners,
-            ).squeeze(0)
-            sample["image"] = img
-        if "mask" in sample:
-            mask: torch.Tensor = sample["mask"].float()
-            h_m, w_m = mask.shape[-2], mask.shape[-1]
-            if h_m != image_size or w_m != image_size:
-                mask = (
-                    F.interpolate(
-                        mask.unsqueeze(0).unsqueeze(0),
-                        size=(image_size, image_size),
-                        mode="nearest",
-                    )
-                    .squeeze(0)
-                    .squeeze(0)
-                    .long()
-                )
-                sample["mask"] = mask
-        return sample
-
-    return _resize
+    return _ResizeTransform(image_size, interpolation, align_corners)
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:

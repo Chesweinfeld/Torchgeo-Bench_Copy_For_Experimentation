@@ -1,0 +1,15 @@
+# Tessera v1.1 encoder (AWS Open Data preprocessing: Earth-search S2 L2A + ASF OPERA RTC-S1)
+# Feature dimension: 128
+# Same architecture as tessera_v1_1_mpc.yaml, different checkpoint + normalization
+# stats -- the two are NOT interchangeable, download the matching .pt file.
+# Download tessera_v1_1_aws_encoder.pt from the table at
+# https://github.com/ucam-eo/tessera/tree/v1.1#v11-qat-model-weight-latest-recommended
+# and pass its local path via: model.checkpoint_path=/path/to/tessera_v1_1_aws_encoder.pt
+
+_target_: torchgeo_bench.models.TesseraV1_1BenchModel
+checkpoint_path: null
+data_source: aws
+default_doy: 182
+enable_sar: false
+pixel_chunk_size: 8192
+name: tessera_v1_1_aws

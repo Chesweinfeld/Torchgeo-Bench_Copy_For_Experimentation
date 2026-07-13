@@ -19,6 +19,7 @@ from typing import Literal, Self
 import h5py
 import numpy as np
 import torch
+from pyproj import Transformer
 from torch.utils.data import Dataset
 
 from .base import BenchDataset
@@ -77,6 +78,61 @@ class BandStats:
         return cls(**d)
 
 
+def _extract_year(band_meta: dict) -> float:
+    """Best-effort acquisition year from a V1 band-metadata dict.
+
+    ``date``/``date_id`` are inconsistently populated across V1 datasets
+    (often both ``None``) — returns ``float("nan")`` when no plausible year
+    can be recovered, so downstream consumers get an explicit missing-value
+    sentinel rather than a wrong guess.
+    """
+    for key in ("date", "date_id"):
+        value = band_meta.get(key)
+        if value is None:
+            continue
+        if hasattr(value, "year"):
+            return float(value.year)
+        if isinstance(value, int | float) and 1900 <= value <= 2100:
+            return float(value)
+    return float("nan")
+
+
+def sample_geolocation(
+    band_meta: dict,
+    geo_fields: tuple[str, ...],
+    height: int,
+    width: int,
+) -> dict[str, torch.Tensor]:
+    """Compute the requested geolocation/time fields for one V1 sample.
+
+    Reprojects the pixel-centroid of ``band_meta["transform"]`` (in
+    ``band_meta["crs"]``) to EPSG:4326 lon/lat. All bands within a sample
+    share the same transform/crs/date, so callers pass the metadata for
+    any single band.
+    """
+    geo: dict[str, torch.Tensor] = {}
+    if not geo_fields:
+        return geo
+
+    if "lat" in geo_fields or "lon" in geo_fields:
+        transform = band_meta["transform"]
+        x, y = transform * (width / 2.0, height / 2.0)
+        crs = str(band_meta["crs"]).upper()
+        if crs not in ("EPSG:4326", "OGC:CRS84"):
+            x, y = Transformer.from_crs(band_meta["crs"], "EPSG:4326", always_xy=True).transform(
+                x, y
+            )
+        if "lon" in geo_fields:
+            geo["lon"] = torch.tensor(x, dtype=torch.float32)
+        if "lat" in geo_fields:
+            geo["lat"] = torch.tensor(y, dtype=torch.float32)
+
+    if "year" in geo_fields:
+        geo["year"] = torch.tensor(_extract_year(band_meta), dtype=torch.float32)
+
+    return geo
+
+
 class GeoBenchv1(Dataset):
     """PyTorch Dataset for GeoBench V1 classification benchmarks.
 
@@ -93,6 +149,8 @@ class GeoBenchv1(Dataset):
             other than ``False``/``None``/``"none"`` triggers a
             :class:`DeprecationWarning`.  Per-channel normalization belongs on
             :class:`~torchgeo_bench.models.interface.BenchModel`.
+        geo_fields: Per-sample fields to attach beyond ``image``/``label``
+            (subset of ``("lat", "lon", "year")``). Empty by default.
     """
 
     def __init__(
@@ -104,6 +162,7 @@ class GeoBenchv1(Dataset):
         bands: tuple[str, ...] | None = None,
         transform: object = None,
         normalize: bool | str | None = None,
+        geo_fields: tuple[str, ...] = (),
     ):
         super().__init__()
         self.root = Path(root)
@@ -111,6 +170,7 @@ class GeoBenchv1(Dataset):
         self.split = split
         self.partition = partition
         self.transform = transform
+        self.geo_fields = geo_fields
 
         if normalize not in (None, False, "none"):
             warnings.warn(
@@ -200,6 +260,9 @@ class GeoBenchv1(Dataset):
             label_t = torch.tensor(label_arr.item(), dtype=torch.long)
 
         sample: dict = {"image": image_t, "label": label_t, "sample_id": sample_id}
+        if self.geo_fields:
+            band_meta = metadata[self.band_names[0]]
+            sample.update(sample_geolocation(band_meta, self.geo_fields, *image.shape[-2:]))
         if self.transform is not None:
             sample = self.transform(sample)  # type: ignore[misc]
         return sample
@@ -274,6 +337,7 @@ class _V1Dataset(BenchDataset):
                 partition=partition,
                 bands=source_bands,
                 transform=transform,
+                geo_fields=self.geo_fields,
             )
         return GeoBenchv1(
             root=self.data_root(),
@@ -282,4 +346,5 @@ class _V1Dataset(BenchDataset):
             partition=partition,
             bands=source_bands,
             transform=transform,
+            geo_fields=self.geo_fields,
         )

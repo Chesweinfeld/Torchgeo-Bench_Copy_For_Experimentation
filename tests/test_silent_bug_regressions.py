@@ -56,3 +56,47 @@ def test_unit_detection_keeps_low_magnitude_bands_in_raw_sensor_stack() -> None:
 
 def test_caffe_rgb_mode_uses_single_declared_gray_channel() -> None:
     assert CaFFe.rgb_bands == ["gray"]
+
+
+def test_resize_transform_handles_standard_3d_image_and_2d_mask() -> None:
+    """Backward-compat: the common (C,H,W) image / (H,W) mask case is unchanged."""
+    transform = _make_resize_transform(8, "bilinear")
+    sample = {"image": torch.rand(3, 16, 16), "mask": torch.randint(0, 5, (16, 16))}
+    out = transform(sample)
+    assert out["image"].shape == (3, 8, 8)
+    assert out["mask"].shape == (8, 8)
+    assert out["mask"].dtype == torch.long
+
+
+def test_resize_transform_handles_extra_leading_image_dim() -> None:
+    """dynamic_earthnet's Planet stream is (T, C, H, W), not (C, H, W) -- the
+    resize must preserve every leading dim, only touching the spatial ones.
+    Previously crashed: F.interpolate saw a 4D tensor after an extra
+    unsqueeze and expected 3D spatial input instead of 2D.
+    """
+    transform = _make_resize_transform(8, "bilinear")
+    sample = {"image": torch.rand(1, 4, 16, 16)}
+    out = transform(sample)
+    assert out["image"].shape == (1, 4, 8, 8)
+
+
+def test_resize_transform_handles_extra_leading_mask_dim() -> None:
+    """dynamic_earthnet's mask still carries rasterio's leading band dim
+    (1, H, W) at transform time, not yet squeezed to plain (H, W). Previously
+    crashed the same way as the image case above.
+    """
+    transform = _make_resize_transform(8, "bilinear")
+    sample = {"mask": torch.randint(0, 5, (1, 16, 16))}
+    out = transform(sample)
+    assert out["mask"].shape == (1, 8, 8)
+
+
+def test_resize_transform_can_be_called_with_mask_only() -> None:
+    """Required for by_sensor datasets: the per-modality resize loop in
+    geobench_v2.py's ``chained`` wrapper calls the transform once per
+    image_* key and once more for "mask" alone -- "image" must be optional.
+    """
+    transform = _make_resize_transform(8, "bilinear")
+    out = transform({"mask": torch.randint(0, 5, (16, 16))})
+    assert "image" not in out
+    assert out["mask"].shape == (8, 8)
