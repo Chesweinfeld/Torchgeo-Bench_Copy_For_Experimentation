@@ -11,6 +11,7 @@ Public API
 
 from .base import BandSpec, BenchDataset
 from .benv2 import BENV2
+from .building_value import BuildingValue, BuildingValueReal, BuildingValueTransfer
 from .burn_scars import BurnScars
 from .caffe import CaFFe
 from .cloudsen12 import CloudSEN12
@@ -47,6 +48,9 @@ __all__ = [
     "list_datasets",
     # Individual dataset classes
     "BENV2",
+    "BuildingValue",
+    "BuildingValueReal",
+    "BuildingValueTransfer",
     "BurnScars",
     "CaFFe",
     "CloudSEN12",

@@ -35,6 +35,12 @@ from torchgeo_bench.knn import KNNClassifier
 from torchgeo_bench.linear import LogisticRegression
 from torchgeo_bench.model_profile import measure_profile
 from torchgeo_bench.models.interface import BenchModel
+from torchgeo_bench.regression import (
+    bootstrap_rmsle,
+    regression_metrics,
+    select_alpha,
+    value_decile_slices,
+)
 from torchgeo_bench.segmentation_probe import (
     SegmentationProbe,
 )
@@ -485,6 +491,126 @@ def evaluate_logistic(
                 f"MCE={calibration_ts['mce_ts']:.4f}"
             )
     return metric, lo, hi, float(best_c), calibration, calibration_ts
+
+
+def _split_regression_labels(
+    y: np.ndarray, group_names: Sequence[str]
+) -> tuple[np.ndarray, dict[str, np.ndarray]]:
+    """Split a regression label array into (target, {group_name: codes}).
+
+    Datasets emit ``label = [target, group_0, ...]``; the target is column 0
+    and any declared groups follow. A 1-D label is treated as target-only.
+    """
+    arr = np.asarray(y)
+    if arr.ndim == 1:
+        return arr.astype(float), {}
+    target = arr[:, 0].astype(float)
+    groups: dict[str, np.ndarray] = {}
+    for i, name in enumerate(group_names):
+        col = i + 1
+        if col < arr.shape[1]:
+            groups[name] = arr[:, col]
+    return target, groups
+
+
+def evaluate_regression(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    x_test: np.ndarray,
+    y_test: np.ndarray,
+    alphas: Sequence[float],
+    group_names: Sequence[str],
+    seed: int,
+    n_bootstrap: int,
+    merge_val: bool,
+    common_meta: dict,
+    feature_dim: int,
+    verbose: bool = False,
+) -> list[dict]:
+    """Fit a ridge probe on frozen features and emit per-metric result rows.
+
+    Mirrors the classification linear-probe flow: sweep the regularization
+    strength on val, optionally merge val into the final fit, then score the
+    test split. Produces one :class:`EvaluationResult` row per metric with
+    ``method="ridge"``; the headline ``rmsle`` row carries a bootstrap CI, and
+    slice rows (informal/formal, value deciles) use ``metric_name`` of the form
+    ``"rmsle@informal"``.
+    """
+    yt_train, _ = _split_regression_labels(y_train, group_names)
+    yt_val, _ = _split_regression_labels(y_val, group_names)
+    yt_test, test_groups = _split_regression_labels(y_test, group_names)
+
+    best_alpha, _ = select_alpha(
+        x_train, yt_train, x_val, yt_val, list(alphas), log_target=True
+    )
+    if merge_val:
+        x_final = np.concatenate([x_train, x_val], axis=0)
+        y_final = np.concatenate([yt_train, yt_val], axis=0)
+    else:
+        x_final, y_final = x_train, yt_train
+
+    from torchgeo_bench.regression import RidgeRegression
+
+    model = RidgeRegression(alpha=best_alpha, log_target=True).fit(x_final, y_final)
+    pred = model.predict(x_test)
+
+    if verbose:
+        logger.info(f"[Ridge] best_alpha={best_alpha:.4g} n_test={len(yt_test)}")
+
+    n_counts = {"train": len(x_train), "val": len(x_val), "test": len(x_test)}
+
+    def _row(metric_name: str, value: float, lo: float = 0.0, hi: float = 0.0) -> dict:
+        return EvaluationResult(
+            **common_meta,
+            method="ridge",
+            metric_name=metric_name,
+            metric_value=float(value),
+            ci_lower=float(lo),
+            ci_upper=float(hi),
+            feature_dim=feature_dim,
+            best_c=float(best_alpha),
+            best_lr=None,
+            best_batch_size=None,
+            n_train=n_counts["train"],
+            n_val=n_counts["val"],
+            n_test=n_counts["test"],
+        ).to_row()
+
+    rows: list[dict] = []
+
+    # Overall metrics — full set.
+    overall = regression_metrics(yt_test, pred)
+    rmsle_pt, rmsle_lo, rmsle_hi = bootstrap_rmsle(
+        yt_test, pred, n_boot=n_bootstrap, seed=seed
+    )
+    for name, val in overall.items():
+        if name == "n":
+            continue
+        if name == "rmsle":
+            rows.append(_row("rmsle", rmsle_pt, rmsle_lo, rmsle_hi))
+        else:
+            rows.append(_row(name, val))
+
+    # Slice metrics — robustness spotlight. Report the headline trio per slice.
+    slices: dict[str, np.ndarray] = {}
+    for gname, codes in test_groups.items():
+        mask = np.asarray(codes).astype(bool)
+        slices[gname] = mask
+        slices[f"not_{gname}"] = ~mask
+    slices.update(value_decile_slices(yt_test))
+
+    for sname, mask in slices.items():
+        mask = np.asarray(mask, dtype=bool)
+        if mask.sum() < 5:
+            continue
+        sm = regression_metrics(yt_test[mask], pred[mask])
+        for key in ("rmsle", "within_factor_2", "mean_log_ratio"):
+            if key in sm:
+                rows.append(_row(f"{key}@{sname}", sm[key]))
+
+    return rows
 
 
 def _make_seg_dataloaders(
@@ -1000,6 +1126,7 @@ def main(cfg: DictConfig) -> None:
 
         seg_method = f"seg-{eval_cfg_merged.segmentation.head_type}"
         seg_key = (ds_name, seg_method, cfg.model._target_, cfg.model.name, *config_tuple)
+        reg_key = (ds_name, "ridge", cfg.model._target_, cfg.model.name, *config_tuple)
         id_key = (ds_name, "intrinsic_dim", cfg.model._target_, cfg.model.name, *config_tuple)
         profile_key = (ds_name, "profile", cfg.model._target_, cfg.model.name, *config_tuple)
 
@@ -1024,6 +1151,7 @@ def main(cfg: DictConfig) -> None:
 
         num_channels = train_dataset[0]["image"].shape[0]
         is_segmentation = ds_cls.task == "segmentation"
+        is_regression = ds_cls.task == "regression"
         is_multilabel = ds_cls.multilabel
         num_classes = ds_cls.num_classes
 
@@ -1153,6 +1281,42 @@ def main(cfg: DictConfig) -> None:
                     n_samples=n_viz,
                     class_names=_class_names,
                 )
+        elif is_regression:
+            # Continuous target (e.g. building structure value). Frozen-feature
+            # ridge probe scored with RMSLE / log-bias / slice metrics.
+            if cfg.resume and reg_key in completed_runs:
+                if cfg.verbose:
+                    logger.info(f"[{ds_name}] Skipping regression (already computed)")
+                continue
+            if getattr(cfg.eval, "skip_linear", False):
+                if cfg.verbose:
+                    logger.info(f"[{ds_name}] skip_linear set; skipping ridge regression")
+                continue
+
+            x_train, y_train = embed_split(model, train_loader, device, verbose=cfg.verbose)
+            x_val, y_val = embed_split(model, val_loader, device, verbose=cfg.verbose)
+            x_test, y_test = embed_split(model, test_loader, device, verbose=cfg.verbose)
+            feature_dim = x_train.shape[1]
+
+            reg_rows = evaluate_regression(
+                x_train,
+                y_train,
+                x_val,
+                y_val,
+                x_test,
+                y_test,
+                alphas=c_values_list,
+                group_names=list(getattr(ds_cls, "regression_group_names", [])),
+                seed=cfg.seed,
+                n_bootstrap=cfg.eval.bootstrap,
+                merge_val=cfg.eval.merge_val,
+                common_meta=common_meta,
+                feature_dim=feature_dim,
+                verbose=cfg.verbose,
+            )
+            if cfg.resume:
+                reg_rows = _filter_completed_metric_rows(reg_rows, completed_metrics, key_cols)
+            all_rows.extend(reg_rows)
         else:
             # Classification (single-label or multi-label)
             metric_name = "micro_mAP" if is_multilabel else "accuracy"

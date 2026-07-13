@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from .base import BenchDataset
 from .benv2 import BENV2
+from .building_value import BuildingValue, BuildingValueReal, BuildingValueTransfer
 from .burn_scars import BurnScars
 from .caffe import CaFFe
 from .cloudsen12 import CloudSEN12
@@ -70,6 +71,10 @@ _REGISTRY: dict[str, type[BenchDataset]] = {
         # torchgeo template
         EuroSAT,
         EuroSATSpatial,
+        # regression
+        BuildingValue,
+        BuildingValueTransfer,
+        BuildingValueReal,
     ]
 }
 
@@ -97,29 +102,29 @@ def list_datasets() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def _make_resize_transform(
-    image_size: int | None,
-    interpolation: str,
-) -> Callable[[dict], dict] | None:
-    """Build a sample-level transform that resizes ``image`` (and ``mask``)."""
-    if image_size is None:
-        return None
+class _ResizeTransform:
+    """Sample-level transform that resizes ``image`` (and ``mask``).
 
-    valid_modes = ("bicubic", "bilinear", "nearest")
-    if interpolation not in valid_modes:
-        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
-    interp_mode = interpolation
-    align_corners = False if interp_mode in ("bicubic", "bilinear") else None
+    A plain class (rather than a closure) so instances are picklable and can
+    be sent to DataLoader worker processes under the ``spawn`` start method
+    (the macOS/Windows default).
+    """
 
-    def _resize(sample: dict) -> dict:
+    def __init__(self, image_size: int, interp_mode: str, align_corners: bool | None) -> None:
+        self.image_size = image_size
+        self.interp_mode = interp_mode
+        self.align_corners = align_corners
+
+    def __call__(self, sample: dict) -> dict:
+        image_size = self.image_size
         img: torch.Tensor = sample["image"]
         h, w = img.shape[-2], img.shape[-1]
         if h != image_size or w != image_size:
             img = F.interpolate(
                 img.unsqueeze(0),
                 size=(image_size, image_size),
-                mode=interp_mode,
-                align_corners=align_corners,
+                mode=self.interp_mode,
+                align_corners=self.align_corners,
             ).squeeze(0)
             sample["image"] = img
         if "mask" in sample:
@@ -139,7 +144,21 @@ def _make_resize_transform(
                 sample["mask"] = mask
         return sample
 
-    return _resize
+
+def _make_resize_transform(
+    image_size: int | None,
+    interpolation: str,
+) -> Callable[[dict], dict] | None:
+    """Build a sample-level transform that resizes ``image`` (and ``mask``)."""
+    if image_size is None:
+        return None
+
+    valid_modes = ("bicubic", "bilinear", "nearest")
+    if interpolation not in valid_modes:
+        raise ValueError(f"interpolation must be one of {valid_modes}, got {interpolation!r}.")
+    align_corners = False if interpolation in ("bicubic", "bilinear") else None
+
+    return _ResizeTransform(image_size, interpolation, align_corners)
 
 
 def _make_loader(ds: Dataset, *, batch_size: int, shuffle: bool, num_workers: int) -> DataLoader:
