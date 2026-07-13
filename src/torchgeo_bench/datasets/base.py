@@ -60,8 +60,9 @@ class BenchDataset(ABC):
 
     Attributes:
         name: Dataset identifier used on the command line (e.g. ``"m-eurosat"``).
-        task: ``"classification"`` or ``"segmentation"``.
-        num_classes: Number of output classes.
+        task: ``"classification"``, ``"segmentation"``, or ``"regression"``.
+        num_classes: Number of output classes. For ``"regression"`` this is the
+            number of continuous targets (``1`` for scalar value prediction).
         bands: Ordered list of all available spectral bands with statistics.
         rgb_bands: Short names of the bands to use for RGB-only mode.
         split_sizes: Number of samples per split for the *default* partition,
@@ -69,16 +70,35 @@ class BenchDataset(ABC):
         multilabel: Whether labels are multi-hot (e.g. BigEarthNet).
         supports_partitions: Whether the dataset honours a non-default
             ``partition`` argument (V1 GeoBench datasets do; V2 does not).
+        regression_target: For ``"regression"`` datasets, a human-readable name
+            of the continuous target (e.g. ``"structure_value_usd"``). Ignored
+            for other tasks.
+        regression_group_names: For ``"regression"`` datasets whose ``label``
+            tensor carries extra per-sample group columns after the target
+            (used for sliced reporting, e.g. an informal-settlement flag),
+            the ordered names of those columns. The label convention is then
+            ``[target, group_0, group_1, ...]``. Empty means "target only".
+
+    Regression label convention
+    ---------------------------
+    Classification datasets emit an integer ``label`` per sample. Regression
+    datasets emit a float ``label`` whose first element is the continuous
+    target. Optionally, additional columns carry boolean/categorical *group*
+    codes (declared in :attr:`regression_group_names`) so the evaluator can
+    report metrics on slices such as informal settlements without changing the
+    generic feature-extraction path.
     """
 
     name: str
-    task: Literal["classification", "segmentation"]
+    task: Literal["classification", "segmentation", "regression"]
     num_classes: int
     bands: list[BandSpec]
     rgb_bands: list[str]
     split_sizes: dict[str, int]
     multilabel: bool = False
     supports_partitions: bool = False
+    regression_target: str = "value"
+    regression_group_names: list[str] = []
 
     @property
     def num_channels(self) -> int:
